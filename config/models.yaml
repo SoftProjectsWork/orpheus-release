@@ -1,0 +1,60 @@
+# Executor routing (ADR-0006: budget zero).
+# No paid API is used. Language-model work is done either:
+#   - claude_session: by Claude in an interactive session on the user's existing subscription,
+#     reading work packets prepared by ORPHEUS and returning JSON that ORPHEUS validates; or
+#   - local_llm: by a free model running on the PC (optional; disabled until tested on the hardware); or
+#   - chat_manuale: by a free chat used by hand by the user (ADR-0011). Enabled on 2026-10-17 19:13 by the user as the
+#     emergency route (few articles, or when Claude cannot work); Claude in session stays the main one.
+# Whatever the executor, output is accepted only if it passes the task's validators.
+executors:
+  - id: claude_session
+    enabled: true
+    cost: free
+    description: Claude in claude.ai / desktop app, within the user's subscription limits. Works in sessions, not unattended.
+  - id: local_llm
+    enabled: false
+    cost: free
+    description: Optional free local model (e.g. via Ollama). Enable only after a benchmark on the user's PC.
+  - id: chat_manuale
+    enabled: true
+    cost: free
+    description: >-
+      A free chat (ChatGPT without a paid subscription, or NotebookLM) used by hand by the user on a work packet
+      (ADR-0011, `orpheus chat-schede`, chat_schede.cmd); the pasted answer passes the cards-v1 validators. No API, no
+      subscription; draft manuscripts excluded. Enabled by the user on 2026-10-17 19:13 for emergencies (cards checked
+      in session by Claude before the first sending); `orpheus chat-schede --invia` puts the accepted cards in the database.
+
+routes:
+  - task_class: identifier_validation
+    executor: deterministic
+    rationale: DOI/ISSN/ORCID/PMID rules and check digits are exact.
+  - task_class: pdf_text_extraction
+    executor: deterministic
+    rationale: Text, pages, hashes and DOI candidates come from the file itself.
+  - task_class: citation_existence_check
+    executor: deterministic
+    rationale: Match against Crossref/PubMed records; a language model must not judge whether a reference exists.
+  - task_class: policy_change_detection
+    executor: deterministic
+    rationale: Content hash + text diff; the model only summarises a diff that code already found.
+  - task_class: deduplication
+    executor: deterministic
+    rationale: Identifier match first, then normalised title/year/author similarity with thresholds.
+  - task_class: structured_extraction
+    executor: claude_session
+    independent_validation: true
+    rationale: Every number must be found verbatim in the cited page span; checked by code on submit.
+  - task_class: critical_appraisal
+    executor: claude_session
+    independent_validation: true
+    rationale: Methodological judgement; must cite the checklist item and text span.
+  - task_class: literature_synthesis
+    executor: claude_session
+    independent_validation: true
+    rationale: Reasoning across studies; every statement linked to evidence records.
+  - task_class: policy_diff_summary
+    executor: claude_session
+    rationale: Summarises an already-computed diff.
+  - task_class: peer_review_simulation
+    executor: claude_session
+    rationale: Strategic critique; presented as simulation, never as prediction.

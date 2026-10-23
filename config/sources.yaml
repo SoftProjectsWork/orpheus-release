@@ -1,0 +1,157 @@
+# Source registry (machine-readable side of SOURCE_REGISTRY.md).
+# Two learning paths confirmed by the user (2026-10-09): free APIs + PDFs on the PC.
+# enabled: false until the connector is implemented AND tested (APIs: live, on the PC).
+# cost: every enabled source must be free (budget zero, ADR-0006).
+# Licensed/institutional services are acquisition: manual — the user exports, ORPHEUS imports.
+sources:
+  - id: local_pdf
+    name: PDF articles and author guidelines in the user's working folder
+    kind: local
+    acquisition: local_files
+    enabled: true
+    auth: none
+    cost: free
+    authoritative_for: [full_text_of_owned_pdfs]
+    notes: Text extracted locally with pypdf; never sent anywhere by ORPHEUS itself.
+    verified_on: 2026-10-09
+  - id: crossref
+    name: Crossref REST API
+    kind: metadata
+    acquisition: api
+    enabled: true
+    base_url: https://api.crossref.org
+    auth: none
+    cost: free
+    authoritative_for: [doi_metadata, references_deposited, funder, licence, update_notices]
+    notes: >-
+      Used by `orpheus verify-dois` (T-008) for /works/{doi}. Polite pool (mailto + User-Agent with the contact
+      e-mail); ORPHEUS sends one request at a time, at most max_requests_per_second (1). Docs checked 2026-10-10:
+      polite 10 req / 3 concurrent, 429 = slow down, 403 = blocked; no sign-up; metadata free to use.
+      Not reachable from the claude.ai sandbox nor the desktop VM: runs from Windows Python on the PC.
+    verified_on: 2026-10-10  # first real run on the asus PC: 135 DOIs, 135 answers 200, 0 errors (verifica_2026-10-10_170229.txt)
+  - id: openalex
+    name: OpenAlex API
+    kind: metadata
+    acquisition: api
+    enabled: true
+    base_url: https://api.openalex.org
+    auth: none
+    cost: free
+    authoritative_for: [work_graph, citation_counts, sources_catalog, two_year_mean_citedness, h_index]
+    notes: >-
+      Enabled 2026-10-15 by the user's decision "SCImago + OpenAlex" (T-028): `orpheus metriche-riviste` asks
+      /sources/issn:<ISSN> for the journals of the table (one request at a time, 1/s, mailto) and writes
+      summary_stats.2yr_mean_citedness and h_index into journal_metric. Docs read 2026-10-15
+      (developers.openalex.org, authentication): single-record lookups free; without a key $0.10/day of usage,
+      a free key (OPENALEX_API_KEY in .env, optional) $1/day; list queries $0.10 per 1000. The works report
+      `orpheus openalex` (Q6) stays read-only.
+  - id: pubmed
+    name: NCBI E-utilities (PubMed)
+    kind: metadata
+    acquisition: api
+    enabled: true
+    base_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils
+    auth: none
+    cost: free
+    authoritative_for: [pmid, mesh_terms, publication_types, retraction_flags_biomed]
+    notes: >-
+      T-009. Official pages read 2026-10-11 (NBK25497 updated 2022-11-17, NBK25499 updated 2026-03-04):
+      3 req/s without key, 10 with free api_key; tool + email on every request; IP block on violations;
+      large jobs on weekends or 21-05 US Eastern; >~200 UIDs -> POST. ORPHEUS: no key, 1 request/s, one at a
+      time; esearch term="<doi>"[aid] OR "<doi>"[lid] -> PMID (rules pubmed-v1: one PMID whose record has the
+      same DOI); efetch retmode=xml in groups of <= 200 -> MeSH, publication types, corrections.
+      Used by `orpheus verifica-pubmed` (verifica_pubmed.cmd), only for confirmed full_text articles. Enabled
+      2026-10-11 for the first real run on the PC (not reachable from the sandbox).
+    verified_on: 2026-10-11  # official documentation + first real run on the asus PC: 172 articles, 169 found, 0 errors (verifica_pubmed_2026-10-11_140423.txt)
+  - id: europepmc
+    name: Europe PMC REST API
+    kind: fulltext
+    acquisition: api
+    enabled: true
+    base_url: https://www.ebi.ac.uk/europepmc/webservices/rest
+    auth: none
+    cost: free
+    authoritative_for: [open_access_fulltext_xml, preprints_biomed]
+    notes: >-
+      T-010. Full text only for the open-access subset (and author manuscripts); respect each article's licence.
+      EMBL-EBI Terms of Use read 2026-10-11 (last revised 2024-02-05): no numeric limits; use that prevents
+      service to others -> user blocked; access only through the service interfaces; attribution expected; no
+      restriction beyond the data owner's. The europepmc.org pages cannot be read from the sandbox (robots.txt):
+      endpoints search?query=DOI:"<doi>"&resultType=core&format=json and /<PMCID>/fullTextXML to be confirmed by
+      the first run on the PC. ORPHEUS: 1 request/s, one at a time, contact e-mail only in the User-Agent.
+      Enabled 2026-10-11 for `orpheus europepmc` (europepmc.cmd). First run on the PC 2026-10-11 21:06: 172 articles,
+      168 found, 11 JATS full texts read, no missing fields. From 0.11.0 `--salva` (migration 0006, user's yes): outcome,
+      PMCID, licence; JATS text and sections kept only with a Creative Commons licence written in the JATS.
+    verified_on: 2026-10-11  # EMBL-EBI terms + first real run on the asus PC (europepmc_2026-10-11_210617.txt)
+  - id: semantic_scholar
+    name: Semantic Scholar Academic Graph API
+    kind: metadata
+    acquisition: api
+    enabled: false
+    base_url: https://api.semanticscholar.org/graph/v1
+    auth: api_key
+    cost: free
+    authoritative_for: [citation_intents, related_papers]
+    notes: Free key on request; unauthenticated limit is shared and low.
+  - id: doaj
+    name: Directory of Open Access Journals API
+    kind: registry
+    acquisition: api
+    enabled: false
+    base_url: https://doaj.org/api
+    auth: none
+    cost: free
+    authoritative_for: [oa_journal_listing, apc_declared]
+  - id: unpaywall
+    name: Unpaywall API
+    kind: fulltext
+    acquisition: api
+    enabled: false
+    base_url: https://api.unpaywall.org/v2
+    auth: none
+    cost: free
+    authoritative_for: [legal_oa_location]
+    notes: Requires the contact e-mail.
+  - id: publisher_site
+    name: Official journal / publisher pages (author guidelines, scope, policies)
+    kind: editorial
+    acquisition: manual
+    enabled: false
+    auth: none
+    cost: free
+    authoritative_for: [author_guidelines, scope, apc, ai_policy, data_policy]
+    notes: For now the user saves guideline pages as PDF into the working folder; automatic page monitoring evaluated in Phase 2.
+  - id: clarivate_jcr
+    name: Clarivate Journal Citation Reports
+    kind: bibliometric
+    acquisition: manual
+    enabled: false
+    base_url: https://jcr.clarivate.com
+    auth: licence
+    cost: free
+    authoritative_for: [JIF, JIF_5Y, JIF_quartile]
+    notes: Official JIF source. Only via the user's institutional access, exported manually; cost free to the user only if the university provides it.
+  - id: scopus
+    name: Elsevier Scopus
+    kind: bibliometric
+    acquisition: manual
+    enabled: false
+    base_url: https://www.scopus.com
+    auth: institutional
+    cost: free
+    authoritative_for: [CiteScore, SNIP]
+    notes: Only via the user's institutional access, exported manually.
+  - id: scimago
+    name: SCImago Journal & Country Rank
+    kind: bibliometric
+    acquisition: manual
+    enabled: true
+    base_url: https://www.scimagojr.com
+    auth: none
+    cost: free
+    authoritative_for: [SJR, SJR_quartile, h_index]
+    notes: >-
+      Enabled 2026-10-15 by the user's decision "SCImago + OpenAlex" (T-028). Manual: the user downloads the
+      ranking file (journalrank.php, button "Download": "scimagojr <year>.csv", ';' and decimal comma; 2025 data
+      on 2026-10-15, Scopus data as of March 2026) into inbox/metriche; `orpheus metriche-riviste` reads it. No
+      automatic download (terms of use not checked for automation).

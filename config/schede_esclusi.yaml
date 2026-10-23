@@ -1,0 +1,10 @@
+# Articoli esclusi dal primo lotto delle schede (T-019, ADR-0008) perché, letti a mano, non sono studi originali
+# (regola dell'utente del 2026-10-11: "solo studi originali"). Il sorteggio prende il successivo nell'ordine del seme.
+# Aggiungere o togliere una riga cambia il lotto: è una decisione da registrare in CHANGELOG.md.
+esclusi:
+  - doi: 10.1016/s1440-2440(99)80174-1
+    motivo: "rassegna delle ricerche degli autori sulle vibrazioni (più studi riassunti, nessun metodo unico)"
+    deciso: "2026-10-11, Claude in sessione T-019, leggendo la prima pagina"
+  - doi: 10.1046/j.1460-9584.1997.00043.x
+    motivo: "articolo di rassegna (Review article) sulle misure di pressione plantare: nessun campione né risultati propri"
+    deciso: "2026-10-19, Claude in sessione (schede degli articoli), leggendo la prima pagina"

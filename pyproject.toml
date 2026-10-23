@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orpheus"
+version = "0.54.0"
+description = "ORPHEUS — Open Research, Publication & High-Quality Editorial Understanding System"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "pypdf>=5.0",
+  "fonttools>=4.40",   # lets pypdf decode CFF fonts (e.g. math symbols in Elsevier PDFs)
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+  "truststore>=0.10",  # TLS certificates checked by the operating system (Windows CryptoAPI), see crossref.tls_context
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "reportlab>=4", "tzdata; sys_platform == 'win32'", "onnx>=1.16"]   # tzdata: fusi orari per zoneinfo su Windows (test del ritmo del loop); onnx: modello minuscolo dei test della Fase 3
+semantica = ["numpy>=1.26", "onnxruntime>=1.18", "tokenizers>=0.19"]   # Fase 3: ricerca per significato con un modello locale (decisione del 2026-10-15)
+cruscotto = ["starlette>=0.40", "uvicorn>=0.30", "httpx>=0.27"]   # Fase 5: cruscotto nel browser servito dal PC (decisione del 2026-10-15); httpx per i test
+
+[project.scripts]
+orpheus = "orpheus.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+orpheus = ["dashboard_static/*", "eurydike/core/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"

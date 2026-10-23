@@ -1,0 +1,34 @@
+ORPHEUS - installazione per i colleghi
+======================================
+
+ORPHEUS raccoglie articoli scientifici, schede delle riviste e degli articoli, e aiuta a preparare i manoscritti.
+Questo pacchetto contiene il programma e Python: non serve installare nient'altro, non serve un account.
+
+INSTALLARE (la prima volta)
+1. Estrai TUTTO lo zip (tasto destro > Estrai tutto...).
+2. Nella cartella estratta fai doppio clic su installa.cmd.
+   - Se Windows mostra "Windows ha protetto il PC": clic su "Ulteriori informazioni" > "Esegui comunque".
+3. Rispondi alle due domande:
+   - cartella dei dati (Invio = C:\ORPHEUS_DATI): li' staranno database, PDF e schede;
+   - la tua e-mail: la chiedono Crossref e OpenAlex per le verifiche; resta solo sul tuo PC.
+4. Alla fine trovi "ORPHEUS" sul desktop (il cruscotto) e i comandi in C:\ORPHEUS.
+La cartella estratta dallo zip si puo' cancellare.
+
+AGGIORNARE
+- Doppio clic su C:\ORPHEUS\aggiorna.cmd (serve internet). Scarica l'ultima versione e la installa.
+  I tuoi dati non vengono toccati; il database viene aggiornato con una copia di sicurezza prima.
+
+RICEVERE LE SCHEDE DI UN COLLEGA
+1. Metti il file ORPHEUS_condivisione_....zip ricevuto in <cartella dei dati>\inbox\condivisione
+   (oppure trascinalo sopra C:\ORPHEUS\importa_schede.cmd).
+2. Doppio clic su C:\ORPHEUS\importa_schede.cmd: ti mostra cosa entrerebbe, poi chiede S/N.
+   Quello che hai gia' resta tuo: si aggiungono solo le riviste, gli articoli, le schede e i pezzi di testo che mancano.
+
+MANDARE LE TUE SCHEDE A UN COLLEGA
+- Doppio clic su C:\ORPHEUS\esporta_schede.cmd: crea il file in <cartella dei dati>\condivisione.
+  Contiene testo di articoli non aperti: mandalo solo a colleghi con gli stessi accessi, MAI su internet o GitHub.
+  Non contiene PDF ne' manoscritti.
+
+SE QUALCOSA NON VA
+- Ogni comando scrive un registro in C:\ORPHEUS\registri; l'installazione in C:\ORPHEUS\installazione_log.txt.
+- Se la ricerca per significato non parte, installa "Microsoft Visual C++ Redistributable" (x64) dal sito Microsoft.

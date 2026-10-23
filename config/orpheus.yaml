@@ -1,0 +1,34 @@
+# ORPHEUS project configuration — versioned in git.
+# Changing a value here is a configuration change: record it in CHANGELOG.md.
+project:
+  name: ORPHEUS
+  version: 0.5.0
+  responsible_human: null          # DA DEFINIRE con l'utente
+  language: it
+  research_domains:
+    - scienze motorie               # confermato dall'utente il 2026-10-09
+    - biomeccanica                  # confermato dall'utente il 2026-10-09
+  storage:
+    # Paths inside the data folder ORPHEUS_HOME (recommended: on the external disk).
+    # They must be relative and without '..', so the folder can move between PCs and drive letters.
+    db_path: data/orpheus.db
+    archive_dir: data/archive
+    inbox_dir: inbox
+    journals_csv: riviste_prioritarie.csv
+  local:
+    # This PC's own folder ORPHEUS_LOCAL_DIR (internal disk, never inside ORPHEUS_HOME) — ADR-0007.
+    auto_backup_minutes: 60        # after a change, back up the database if the last local backup is older; 0 = off
+    keep_local_backups: 20         # per database; older local backup files are deleted
+  limits:
+    paid_services_allowed: false    # decisione dell'utente 2026-10-09: budget 0, solo strumenti gratuiti
+    monthly_budget_usd: 0
+    run_timeout_seconds: 900
+    max_retries: 3
+    max_requests_per_second: 1      # prudente verso le API pubbliche; ogni connettore può abbassarlo
+  require_human_approval_for:
+    - add_or_remove_journal_from_priority_list
+    - send_manuscript_to_external_service
+    - declare_manuscript_ready_for_submission
+    - change_model_routing
+    - enable_scheduled_job
+    - delete_or_overwrite_archived_document

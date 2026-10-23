@@ -1,0 +1,1118 @@
+{
+ "fonte": "Tabula v19, sorgente pubblicato (artifact 00c35069…, versione 1792067638-22bc), oggetti ROB_TOOLS, QSC e QUAL_TOOLS; copiato il 2026-10-20 (decisione dell'utente: strumenti uguali a Tabula v19)",
+ "rob": {
+  "rob2": {
+   "name": "RoB 2 (RCT)",
+   "scale": [
+    [
+     "low",
+     "Basso"
+    ],
+    [
+     "some",
+     "Alcune preoccupazioni"
+    ],
+    [
+     "high",
+     "Alto"
+    ]
+   ],
+   "domains": [
+    {
+     "id": "D1",
+     "t": "Processo di randomizzazione",
+     "h": "Generazione e occultamento della sequenza; squilibri al baseline"
+    },
+    {
+     "id": "D2",
+     "t": "Deviazioni dagli interventi previsti",
+     "h": "Cecità di partecipanti e operatori; deviazioni dovute al contesto; analisi appropriata (ITT)"
+    },
+    {
+     "id": "D3",
+     "t": "Dati di outcome mancanti",
+     "h": "Disponibilità dei dati per tutti o quasi i randomizzati; dipendenza dal valore vero"
+    },
+    {
+     "id": "D4",
+     "t": "Misurazione dell'outcome",
+     "h": "Metodo appropriato; uguale tra gruppi; cecità dei valutatori"
+    },
+    {
+     "id": "D5",
+     "t": "Selezione del risultato riportato",
+     "h": "Piano di analisi prespecificato; selezione tra misure o analisi multiple"
+    }
+   ]
+  },
+  "robinsi": {
+   "name": "ROBINS-I (non randomizzati)",
+   "scale": [
+    [
+     "low",
+     "Basso"
+    ],
+    [
+     "moderate",
+     "Moderato"
+    ],
+    [
+     "serious",
+     "Serio"
+    ],
+    [
+     "critical",
+     "Critico"
+    ],
+    [
+     "ni",
+     "Nessuna informazione"
+    ]
+   ],
+   "domains": [
+    {
+     "id": "D1",
+     "t": "Confondimento",
+     "h": "Fattori di confondimento rilevanti e metodi per controllarli"
+    },
+    {
+     "id": "D2",
+     "t": "Selezione dei partecipanti",
+     "h": "Selezione legata a intervento e outcome; inizio del follow-up"
+    },
+    {
+     "id": "D3",
+     "t": "Classificazione degli interventi",
+     "h": "Definizione chiara; classificazione influenzata dall'outcome"
+    },
+    {
+     "id": "D4",
+     "t": "Deviazioni dagli interventi previsti",
+     "h": "Co-interventi, deviazioni sbilanciate"
+    },
+    {
+     "id": "D5",
+     "t": "Dati mancanti",
+     "h": "Proporzione e gestione dei dati mancanti"
+    },
+    {
+     "id": "D6",
+     "t": "Misurazione degli outcome",
+     "h": "Consapevolezza dell'intervento; metodi comparabili"
+    },
+    {
+     "id": "D7",
+     "t": "Selezione del risultato riportato",
+     "h": "Selezione tra misure, analisi o sottogruppi"
+    }
+   ]
+  },
+  "quadas2": {
+   "name": "QUADAS-2 (accuratezza diagnostica)",
+   "scale": [
+    [
+     "low",
+     "Basso"
+    ],
+    [
+     "high",
+     "Alto"
+    ],
+    [
+     "unclear",
+     "Non chiaro"
+    ]
+   ],
+   "domains": [
+    {
+     "id": "D1",
+     "t": "Selezione dei pazienti",
+     "h": "Campionamento consecutivo o casuale; disegno caso-controllo evitato; esclusioni inappropriate"
+    },
+    {
+     "id": "D2",
+     "t": "Test indice",
+     "h": "Interpretazione in cieco rispetto al riferimento; soglia prespecificata"
+    },
+    {
+     "id": "D3",
+     "t": "Standard di riferimento",
+     "h": "Classificazione corretta della condizione; cecità rispetto al test indice"
+    },
+    {
+     "id": "D4",
+     "t": "Flusso e tempistica",
+     "h": "Intervallo appropriato; stesso riferimento per tutti; tutti inclusi nell'analisi"
+    }
+   ]
+  },
+  "nos": {
+   "name": "Newcastle–Ottawa (coorte)",
+   "scale": [
+    [
+     "low",
+     "★ assegnata"
+    ],
+    [
+     "high",
+     "Nessuna ★"
+    ],
+    [
+     "ni",
+     "Non riportato"
+    ]
+   ],
+   "domains": [
+    {
+     "id": "S1",
+     "t": "Rappresentatività della coorte esposta",
+     "h": "Selezione"
+    },
+    {
+     "id": "S2",
+     "t": "Selezione della coorte non esposta",
+     "h": "Selezione"
+    },
+    {
+     "id": "S3",
+     "t": "Accertamento dell'esposizione",
+     "h": "Selezione"
+    },
+    {
+     "id": "S4",
+     "t": "Outcome assente all'inizio dello studio",
+     "h": "Selezione"
+    },
+    {
+     "id": "C1",
+     "t": "Comparabilità (fattore principale)",
+     "h": "Comparabilità: controllo per il fattore più importante"
+    },
+    {
+     "id": "C2",
+     "t": "Comparabilità (fattore aggiuntivo)",
+     "h": "Comparabilità: controllo per un fattore aggiuntivo"
+    },
+    {
+     "id": "O1",
+     "t": "Valutazione dell'outcome",
+     "h": "Outcome"
+    },
+    {
+     "id": "O2",
+     "t": "Follow-up sufficientemente lungo",
+     "h": "Outcome"
+    },
+    {
+     "id": "O3",
+     "t": "Adeguatezza del follow-up",
+     "h": "Outcome"
+    }
+   ]
+  },
+  "custom": {
+   "name": "Strumento personalizzato",
+   "scale": [
+    [
+     "low",
+     "Basso"
+    ],
+    [
+     "some",
+     "Incerto"
+    ],
+    [
+     "high",
+     "Alto"
+    ]
+   ],
+   "domains": [],
+   "custom": true,
+   "prefix": "C"
+  }
+ },
+ "qual": {
+  "qualsyst": {
+   "name": "QualSyst — Kmet, Lee & Cook (2004)",
+   "ref": "HTA Initiative #13, Alberta Heritage Foundation for Medical Research",
+   "use": "Disegni eterogenei: è lo strumento pensato per revisioni che mettono insieme studi diversi, come questa.",
+   "mode": "sum",
+   "show": "ratio",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     2
+    ],
+    [
+     "p",
+     "In parte",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "na",
+     "Non applicabile",
+     null
+    ]
+   ],
+   "bands": [
+    [
+     75,
+     "forte"
+    ],
+    [
+     55,
+     "adeguata"
+    ],
+    [
+     0,
+     "debole"
+    ]
+   ],
+   "bandNote": "Soglie proposte dagli autori: 0,55 come criterio permissivo, 0,75 come criterio conservativo.",
+   "items": [
+    {
+     "id": "k1",
+     "t": "Domanda o obiettivo descritti in modo sufficiente"
+    },
+    {
+     "id": "k2",
+     "t": "Disegno dello studio evidente e appropriato alla domanda"
+    },
+    {
+     "id": "k3",
+     "t": "Metodo di selezione dei soggetti o del gruppo di confronto descritto e appropriato"
+    },
+    {
+     "id": "k4",
+     "t": "Caratteristiche dei soggetti descritte in modo sufficiente"
+    },
+    {
+     "id": "k5",
+     "t": "Assegnazione casuale descritta (se studio interventistico)",
+     "h": "Non applicabile negli studi osservazionali o di sola misura"
+    },
+    {
+     "id": "k6",
+     "t": "Cecità degli sperimentatori riportata (se interventistico)"
+    },
+    {
+     "id": "k7",
+     "t": "Cecità dei soggetti riportata (se interventistico)"
+    },
+    {
+     "id": "k8",
+     "t": "Misure di outcome o di esposizione ben definite e poco soggette a distorsione"
+    },
+    {
+     "id": "k9",
+     "t": "Numerosità campionaria adeguata"
+    },
+    {
+     "id": "k10",
+     "t": "Metodi di analisi descritti e appropriati"
+    },
+    {
+     "id": "k11",
+     "t": "Stima della variabilità riportata per i risultati principali",
+     "h": "DS, errore standard, intervalli di confidenza"
+    },
+    {
+     "id": "k12",
+     "t": "Controllo dei fattori di confondimento"
+    },
+    {
+     "id": "k13",
+     "t": "Risultati riportati con sufficiente dettaglio"
+    },
+    {
+     "id": "k14",
+     "t": "Conclusioni sostenute dai risultati"
+    }
+   ]
+  },
+  "downsblack": {
+   "name": "Downs & Black (1998)",
+   "ref": "J Epidemiol Community Health 52:377–384",
+   "use": "Studi interventistici e osservazionali, randomizzati o no: la lista più usata quando serve un punteggio unico.",
+   "mode": "sum",
+   "show": "points",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "u",
+     "Non determinabile",
+     0
+    ]
+   ],
+   "bands": [
+    [
+     75,
+     "buona"
+    ],
+    [
+     50,
+     "moderata"
+    ],
+    [
+     25,
+     "limitata"
+    ],
+    [
+     0,
+     "scarsa"
+    ]
+   ],
+   "bandNote": "Le fasce percentuali sono una convenzione diffusa in letteratura, non fanno parte dello strumento originale. La voce sulla potenza qui è ridotta a sì/no invece della scala 0–5.",
+   "sections": [
+    [
+     "rep",
+     "Rendicontazione"
+    ],
+    [
+     "ext",
+     "Validità esterna"
+    ],
+    [
+     "bias",
+     "Validità interna — bias"
+    ],
+    [
+     "conf",
+     "Validità interna — confondimento"
+    ],
+    [
+     "pow",
+     "Potenza"
+    ]
+   ],
+   "items": [
+    {
+     "id": "d1",
+     "s": "rep",
+     "t": "Obiettivo o ipotesi descritti chiaramente"
+    },
+    {
+     "id": "d2",
+     "s": "rep",
+     "t": "Outcome principali definiti in introduzione o nei metodi"
+    },
+    {
+     "id": "d3",
+     "s": "rep",
+     "t": "Caratteristiche dei partecipanti descritte"
+    },
+    {
+     "id": "d4",
+     "s": "rep",
+     "t": "Interventi o condizioni sperimentali descritti chiaramente"
+    },
+    {
+     "id": "d5",
+     "s": "rep",
+     "t": "Distribuzione dei principali fattori di confondimento riportata",
+     "scale": [
+      [
+       "y",
+       "Sì, per tutti i principali",
+       2
+      ],
+      [
+       "p",
+       "In parte",
+       1
+      ],
+      [
+       "n",
+       "No",
+       0
+      ]
+     ]
+    },
+    {
+     "id": "d6",
+     "s": "rep",
+     "t": "Risultati principali riportati in modo chiaro"
+    },
+    {
+     "id": "d7",
+     "s": "rep",
+     "t": "Riportate stime della variabilità casuale dei dati"
+    },
+    {
+     "id": "d8",
+     "s": "rep",
+     "t": "Riportati eventi avversi o problemi tecnici"
+    },
+    {
+     "id": "d9",
+     "s": "rep",
+     "t": "Partecipanti persi o esclusi descritti"
+    },
+    {
+     "id": "d10",
+     "s": "rep",
+     "t": "Riportati i valori di probabilità effettivi, non solo p<0,05"
+    },
+    {
+     "id": "d11",
+     "s": "ext",
+     "t": "I soggetti invitati erano rappresentativi della popolazione di origine"
+    },
+    {
+     "id": "d12",
+     "s": "ext",
+     "t": "I soggetti che hanno accettato erano rappresentativi"
+    },
+    {
+     "id": "d13",
+     "s": "ext",
+     "t": "Setting, strumentazione e condizioni rappresentativi dell'uso reale"
+    },
+    {
+     "id": "d14",
+     "s": "bias",
+     "t": "Partecipanti in cieco rispetto alla condizione sperimentale"
+    },
+    {
+     "id": "d15",
+     "s": "bias",
+     "t": "Chi ha misurato gli outcome era in cieco"
+    },
+    {
+     "id": "d16",
+     "s": "bias",
+     "t": "È chiaro quali analisi siano state decise a posteriori"
+    },
+    {
+     "id": "d17",
+     "s": "bias",
+     "t": "Tempi di misura o di follow-up uguali fra i gruppi, o differenze trattate"
+    },
+    {
+     "id": "d18",
+     "s": "bias",
+     "t": "Test statistici appropriati"
+    },
+    {
+     "id": "d19",
+     "s": "bias",
+     "t": "Aderenza all'intervento o al protocollo di misura attendibile"
+    },
+    {
+     "id": "d20",
+     "s": "bias",
+     "t": "Strumenti e misure di outcome validi e affidabili"
+    },
+    {
+     "id": "d21",
+     "s": "conf",
+     "t": "I gruppi provengono dalla stessa popolazione"
+    },
+    {
+     "id": "d22",
+     "s": "conf",
+     "t": "I gruppi sono stati reclutati nello stesso periodo"
+    },
+    {
+     "id": "d23",
+     "s": "conf",
+     "t": "Assegnazione ai gruppi randomizzata"
+    },
+    {
+     "id": "d24",
+     "s": "conf",
+     "t": "Assegnazione occultata fino all'arruolamento"
+    },
+    {
+     "id": "d25",
+     "s": "conf",
+     "t": "L'analisi aggiusta adeguatamente per i confondenti"
+    },
+    {
+     "id": "d26",
+     "s": "conf",
+     "t": "Le perdite al follow-up sono considerate nell'analisi"
+    },
+    {
+     "id": "d27",
+     "s": "pow",
+     "t": "Numerosità sufficiente a rilevare un effetto rilevante"
+    }
+   ]
+  },
+  "axis": {
+   "name": "AXIS — Downes et al. (2016)",
+   "ref": "BMJ Open 6:e011458",
+   "use": "Studi trasversali. Gli autori sconsigliano un punteggio totale: qui si conta solo quante voci sono soddisfatte.",
+   "mode": "count",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "u",
+     "Non so",
+     0
+    ]
+   ],
+   "items": [
+    {
+     "id": "a1",
+     "t": "Obiettivi dello studio chiari"
+    },
+    {
+     "id": "a2",
+     "t": "Disegno appropriato agli obiettivi dichiarati"
+    },
+    {
+     "id": "a3",
+     "t": "Numerosità campionaria giustificata"
+    },
+    {
+     "id": "a4",
+     "t": "Popolazione di riferimento definita chiaramente"
+    },
+    {
+     "id": "a5",
+     "t": "Base di campionamento rappresentativa della popolazione di riferimento"
+    },
+    {
+     "id": "a6",
+     "t": "Processo di selezione tale da produrre un campione rappresentativo"
+    },
+    {
+     "id": "a7",
+     "t": "Misure adottate per descrivere e classificare i non rispondenti"
+    },
+    {
+     "id": "a8",
+     "t": "Variabili di esposizione e di esito appropriate agli obiettivi"
+    },
+    {
+     "id": "a9",
+     "t": "Variabili misurate con strumenti già validati, pilotati o pubblicati"
+    },
+    {
+     "id": "a10",
+     "t": "Chiaro come sono state determinate significatività o precisione delle stime"
+    },
+    {
+     "id": "a11",
+     "t": "Metodi, statistica compresa, descritti in modo riproducibile"
+    },
+    {
+     "id": "a12",
+     "t": "Dati di base descritti adeguatamente"
+    },
+    {
+     "id": "a13",
+     "t": "Il tasso di risposta non solleva dubbi di distorsione da non risposta"
+    },
+    {
+     "id": "a14",
+     "t": "Informazioni sui non rispondenti riportate, dove pertinente"
+    },
+    {
+     "id": "a15",
+     "t": "Risultati internamente coerenti"
+    },
+    {
+     "id": "a16",
+     "t": "Presentati i risultati di tutte le analisi descritte nei metodi"
+    },
+    {
+     "id": "a17",
+     "t": "Discussione e conclusioni giustificate dai risultati"
+    },
+    {
+     "id": "a18",
+     "t": "Limiti dello studio discussi"
+    },
+    {
+     "id": "a19",
+     "t": "Finanziamenti e conflitti di interesse tali da non inficiare l'interpretazione"
+    },
+    {
+     "id": "a20",
+     "t": "Approvazione etica o consenso dei partecipanti ottenuti"
+    }
+   ]
+  },
+  "qarel": {
+   "name": "QAREL — Lucas et al. (2010)",
+   "ref": "J Clin Epidemiol 63:854–861",
+   "use": "Studi di affidabilità di una misura: ripetibilità intra e inter-operatore.",
+   "mode": "count",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "u",
+     "Non chiaro",
+     0
+    ],
+    [
+     "na",
+     "Non applicabile",
+     null
+    ]
+   ],
+   "items": [
+    {
+     "id": "q1",
+     "t": "Campione di soggetti rappresentativo"
+    },
+    {
+     "id": "q2",
+     "t": "Campione di operatori rappresentativo"
+    },
+    {
+     "id": "q3",
+     "t": "Operatori in cieco rispetto ai risultati degli altri operatori"
+    },
+    {
+     "id": "q4",
+     "t": "Operatori in cieco rispetto alle proprie misure precedenti"
+    },
+    {
+     "id": "q5",
+     "t": "Operatori in cieco rispetto allo standard di riferimento"
+    },
+    {
+     "id": "q6",
+     "t": "Operatori in cieco rispetto a informazioni cliniche esterne al test"
+    },
+    {
+     "id": "q7",
+     "t": "Operatori in cieco rispetto ad altri indizi non clinici"
+    },
+    {
+     "id": "q8",
+     "t": "Ordine delle misurazioni variato"
+    },
+    {
+     "id": "q9",
+     "t": "Intervallo fra le misure ripetute appropriato"
+    },
+    {
+     "id": "q10",
+     "t": "Test applicato e interpretato correttamente"
+    },
+    {
+     "id": "q11",
+     "t": "Misure di concordanza statistiche appropriate"
+    }
+   ]
+  },
+  "cosminrel": {
+   "name": "COSMIN — affidabilità",
+   "ref": "COSMIN Risk of Bias tool, Mokkink et al. (2021)",
+   "use": "Studi che stimano l'affidabilità test-retest o fra operatori di uno strumento di misura. Il giudizio complessivo è il peggiore fra le voci.",
+   "mode": "worst",
+   "scale": [
+    [
+     "vg",
+     "Molto buono",
+     4
+    ],
+    [
+     "ad",
+     "Adeguato",
+     3
+    ],
+    [
+     "db",
+     "Dubbio",
+     2
+    ],
+    [
+     "in",
+     "Inadeguato",
+     1
+    ],
+    [
+     "na",
+     "Non applicabile",
+     null
+    ]
+   ],
+   "items": [
+    {
+     "id": "c1",
+     "t": "I soggetti erano stabili nell'intervallo fra le misure ripetute"
+    },
+    {
+     "id": "c2",
+     "t": "Intervallo fra le misure appropriato"
+    },
+    {
+     "id": "c3",
+     "t": "Condizioni di misura simili, a parte la fonte di variazione in studio"
+    },
+    {
+     "id": "c4",
+     "t": "Chi somministrava la misura non conosceva gli altri risultati"
+    },
+    {
+     "id": "c5",
+     "t": "Chi assegnava il punteggio non conosceva gli altri risultati"
+    },
+    {
+     "id": "c6",
+     "t": "Nessun altro difetto importante di disegno o di analisi"
+    },
+    {
+     "id": "c7",
+     "t": "Per dati continui: calcolato un coefficiente di correlazione intraclasse",
+     "h": "Per dati ordinali: kappa ponderato; per dati nominali: kappa per categoria"
+    }
+   ]
+  },
+  "cosminerr": {
+   "name": "COSMIN — errore di misura",
+   "ref": "COSMIN Risk of Bias tool, Mokkink et al. (2021)",
+   "use": "Studi che quantificano l'errore di misura: SEM, minima differenza rilevabile, limiti di concordanza.",
+   "mode": "worst",
+   "scale": [
+    [
+     "vg",
+     "Molto buono",
+     4
+    ],
+    [
+     "ad",
+     "Adeguato",
+     3
+    ],
+    [
+     "db",
+     "Dubbio",
+     2
+    ],
+    [
+     "in",
+     "Inadeguato",
+     1
+    ],
+    [
+     "na",
+     "Non applicabile",
+     null
+    ]
+   ],
+   "items": [
+    {
+     "id": "e1",
+     "t": "I soggetti erano stabili nell'intervallo fra le misure ripetute"
+    },
+    {
+     "id": "e2",
+     "t": "Intervallo fra le misure appropriato"
+    },
+    {
+     "id": "e3",
+     "t": "Condizioni di misura simili, a parte la fonte di variazione in studio"
+    },
+    {
+     "id": "e4",
+     "t": "Chi somministrava la misura non conosceva gli altri risultati"
+    },
+    {
+     "id": "e5",
+     "t": "Chi assegnava il punteggio non conosceva gli altri risultati"
+    },
+    {
+     "id": "e6",
+     "t": "Nessun altro difetto importante di disegno o di analisi"
+    },
+    {
+     "id": "e7",
+     "t": "Calcolati SEM, minima differenza rilevabile, limiti di concordanza o coefficiente di variazione"
+    }
+   ]
+  },
+  "pedro": {
+   "name": "PEDro (scala per trial randomizzati)",
+   "ref": "pedro.org.au · Maher et al. (2003)",
+   "use": "Trial controllati randomizzati in riabilitazione e scienze motorie. La prima voce non entra nel punteggio: il totale è su 10.",
+   "mode": "sum",
+   "show": "points",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "u",
+     "Non determinabile",
+     0
+    ]
+   ],
+   "bands": [
+    [
+     60,
+     "alta"
+    ],
+    [
+     40,
+     "discreta"
+    ],
+    [
+     0,
+     "bassa"
+    ]
+   ],
+   "bandNote": "Convenzione diffusa: ≥6/10 qualità alta, 4–5 discreta, ≤3 bassa.",
+   "items": [
+    {
+     "id": "p1",
+     "t": "Criteri di eleggibilità specificati",
+     "h": "Voce di sola rendicontazione: non entra nel totale",
+     "noscore": true
+    },
+    {
+     "id": "p2",
+     "t": "Assegnazione casuale dei soggetti ai gruppi"
+    },
+    {
+     "id": "p3",
+     "t": "Assegnazione occultata"
+    },
+    {
+     "id": "p4",
+     "t": "Gruppi simili al baseline sui principali indicatori prognostici"
+    },
+    {
+     "id": "p5",
+     "t": "Cecità di tutti i soggetti"
+    },
+    {
+     "id": "p6",
+     "t": "Cecità di tutti gli operatori che hanno erogato il trattamento"
+    },
+    {
+     "id": "p7",
+     "t": "Cecità di tutti i valutatori su almeno un outcome chiave"
+    },
+    {
+     "id": "p8",
+     "t": "Misure di almeno un outcome chiave su più dell'85% dei soggetti assegnati"
+    },
+    {
+     "id": "p9",
+     "t": "Analisi per intenzione di trattare, o trattamento ricevuto come assegnato"
+    },
+    {
+     "id": "p10",
+     "t": "Riportato il confronto statistico fra gruppi su almeno un outcome chiave"
+    },
+    {
+     "id": "p11",
+     "t": "Riportate misure di tendenza centrale e di variabilità per almeno un outcome chiave"
+    }
+   ]
+  },
+  "mmatdesc": {
+   "name": "MMAT 2018 — studi quantitativi descrittivi",
+   "ref": "Hong et al. (2018), Mixed Methods Appraisal Tool",
+   "use": "Studi descrittivi senza gruppo di confronto. Gli autori sconsigliano un punteggio: si riporta quante voci sono soddisfatte.",
+   "mode": "count",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "u",
+     "Non so",
+     0
+    ]
+   ],
+   "sections": [
+    [
+     "scr",
+     "Domande di screening"
+    ],
+    [
+     "crit",
+     "Criteri"
+    ]
+   ],
+   "items": [
+    {
+     "id": "m0a",
+     "s": "scr",
+     "t": "Le domande di ricerca sono chiare"
+    },
+    {
+     "id": "m0b",
+     "s": "scr",
+     "t": "I dati raccolti permettono di rispondere alle domande di ricerca"
+    },
+    {
+     "id": "m1",
+     "s": "crit",
+     "t": "Strategia di campionamento pertinente alla domanda di ricerca"
+    },
+    {
+     "id": "m2",
+     "s": "crit",
+     "t": "Campione rappresentativo della popolazione bersaglio"
+    },
+    {
+     "id": "m3",
+     "s": "crit",
+     "t": "Misure appropriate"
+    },
+    {
+     "id": "m4",
+     "s": "crit",
+     "t": "Rischio di distorsione da non risposta contenuto"
+    },
+    {
+     "id": "m5",
+     "s": "crit",
+     "t": "Analisi statistica appropriata alla domanda di ricerca"
+    }
+   ]
+  },
+  "mmatnr": {
+   "name": "MMAT 2018 — studi quantitativi non randomizzati",
+   "ref": "Hong et al. (2018), Mixed Methods Appraisal Tool",
+   "use": "Studi con confronto fra gruppi o condizioni senza randomizzazione.",
+   "mode": "count",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "u",
+     "Non so",
+     0
+    ]
+   ],
+   "sections": [
+    [
+     "scr",
+     "Domande di screening"
+    ],
+    [
+     "crit",
+     "Criteri"
+    ]
+   ],
+   "items": [
+    {
+     "id": "n0a",
+     "s": "scr",
+     "t": "Le domande di ricerca sono chiare"
+    },
+    {
+     "id": "n0b",
+     "s": "scr",
+     "t": "I dati raccolti permettono di rispondere alle domande di ricerca"
+    },
+    {
+     "id": "n1",
+     "s": "crit",
+     "t": "Partecipanti rappresentativi della popolazione bersaglio"
+    },
+    {
+     "id": "n2",
+     "s": "crit",
+     "t": "Misure appropriate sia per l'esito sia per l'intervento o l'esposizione"
+    },
+    {
+     "id": "n3",
+     "s": "crit",
+     "t": "Dati di esito completi"
+    },
+    {
+     "id": "n4",
+     "s": "crit",
+     "t": "Fattori di confondimento considerati nel disegno e nell'analisi"
+    },
+    {
+     "id": "n5",
+     "s": "crit",
+     "t": "Intervento somministrato, o esposizione avvenuta, come previsto"
+    }
+   ]
+  },
+  "qcustom": {
+   "name": "Lista personalizzata",
+   "ref": "",
+   "use": "Voci scritte da te nel protocollo, una per riga.",
+   "mode": "count",
+   "scale": [
+    [
+     "y",
+     "Sì",
+     1
+    ],
+    [
+     "n",
+     "No",
+     0
+    ],
+    [
+     "u",
+     "Non determinabile",
+     0
+    ]
+   ],
+   "custom": true,
+   "items": [],
+   "prefix": "x"
+  }
+ }
+}

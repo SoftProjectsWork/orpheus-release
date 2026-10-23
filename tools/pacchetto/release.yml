@@ -1,0 +1,68 @@
+# Pacchetto Windows di ORPHEUS con Python incluso (T-053). Copiato qui da tools/pacchetto/release.yml del repository
+# privato con tools/pacchetto/pubblica.py: non modificarlo in questo repository.
+# Si avvia con un tag vX.Y.Z (lo mette Claude a ogni versione da distribuire) oppure a mano (Actions > Run workflow:
+# costruisce e prova il pacchetto senza pubblicarlo).
+name: Pacchetto Windows
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pacchetto:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python embeddable da python.org
+        shell: pwsh
+        run: |
+          $v = '3.12.10'
+          Invoke-WebRequest "https://www.python.org/ftp/python/$v/python-$v-embed-amd64.zip" -OutFile python-embed.zip
+
+      - name: Costruisci lo zip
+        run: python tools/pacchetto/costruisci.py --python-zip python-embed.zip --out dist
+
+      - name: Prova - installazione da zero, esportazione, unione, aggiornamento
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist -Filter 'ORPHEUS_*_windows.zip' | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath prova
+          $inst = Get-ChildItem prova -Recurse -Filter installa.ps1 | Select-Object -First 1
+          $env:ORPHEUS_INSTALL_ROOT = "$PWD\prova_pc\ORPHEUS"
+          $env:ORPHEUS_INSTALL_DATI = "$PWD\prova_pc\ORPHEUS_DATI"
+          $env:ORPHEUS_INSTALL_EMAIL = 'prova@example.org'
+          & $inst.FullName
+          if ($LASTEXITCODE -ne 0) { throw "installazione non riuscita" }
+          $py = "$env:ORPHEUS_INSTALL_ROOT\python\python.exe"
+          & $py -c "import onnxruntime, tokenizers, numpy, starlette, uvicorn, pypdf, pydantic, yaml, truststore; print('librerie ok')"
+          if ($LASTEXITCODE -ne 0) { throw "librerie mancanti" }
+          Push-Location "$env:ORPHEUS_INSTALL_ROOT\orpheus"
+          & $py -m orpheus condivisione-esporta
+          if ($LASTEXITCODE -ne 0) { throw "esportazione non riuscita" }
+          $pkg = Get-ChildItem "$env:ORPHEUS_INSTALL_DATI\condivisione" -Filter *.zip | Select-Object -First 1
+          & $py -m orpheus condivisione-unisci $pkg.FullName --prova
+          if ($LASTEXITCODE -ne 0) { throw "unione non riuscita" }
+          Pop-Location
+          & "$env:ORPHEUS_INSTALL_ROOT\aggiorna.ps1" -Pacchetto $zip.FullName
+          if ($LASTEXITCODE -ne 0) { throw "aggiornamento non riuscito" }
+          Get-Content "$env:ORPHEUS_INSTALL_ROOT\installazione_log.txt"
+
+      - name: Pubblica la versione
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = Get-ChildItem dist -Filter 'ORPHEUS_*_windows.zip' | Select-Object -First 1
+          $notes = "Pacchetto per Windows con Python incluso. Prima installazione: scarica lo zip, estrai tutto, doppio clic su installa.cmd. Aggiornamento: doppio clic su C:\ORPHEUS\aggiorna.cmd."
+          gh release create "${{ github.ref_name }}" $zip.FullName --title "ORPHEUS ${{ github.ref_name }}" --notes $notes

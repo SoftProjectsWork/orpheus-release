@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+dist/
+prova/
+prova_pc/
+python-embed.zip
+.env

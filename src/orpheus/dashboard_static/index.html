@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cruscotto ORPHEUS</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d6b58'/%3E%3Cpath d='M8%206.5C11.9%206.5%2013.5%2010.1%2013.1%2013.6C12.8%2016.4%2011%2018.9%207.5%2020M24%206.5C20.1%206.5%2018.5%2010.1%2018.9%2013.6C19.2%2016.4%2021%2018.9%2024.5%2020M7.5%2020H24.5M16%2020V26.5' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body data-token="__ORPHEUS_TOKEN__" data-version="__ORPHEUS_VERSION__">
+<a class="skip" href="#main" data-i18n="Vai al contenuto">Vai al contenuto</a>
+<div class="shell">
+  <nav class="side" aria-label="Sezioni del cruscotto" data-i18n-aria="Sezioni del cruscotto">
+    <div class="brand">
+      <svg class="brand-mark" id="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path class="mark-o" d="M8 6.5C11.9 6.5 13.5 10.1 13.1 13.6C12.8 16.4 11 18.9 7.5 20M24 6.5C20.1 6.5 18.5 10.1 18.9 13.6C19.2 16.4 21 18.9 24.5 20M7.5 20H24.5M16 20V26.5"/><g class="mark-e"><circle cx="16" cy="11" r="5.6"/><path d="M10.4 11H21.6M16 16.6V27M11.5 22H20.5"/></g></svg>
+      <div><p class="brand-name" id="brand-name">ORPHEUS</p><p class="brand-sub" id="brand-sub"></p></div>
+    </div>
+    <div class="modsel" role="group" aria-label="Modulo" data-i18n-aria="Modulo">
+      <button type="button" data-module-set="orpheus" aria-pressed="true">ORPHEUS</button>
+      <button type="button" data-module-set="eurydike" aria-pressed="false">EURYDIKE</button>
+    </div>
+    <ul class="nav" id="nav"></ul>
+    <div class="side-foot">
+      <div id="lavora-badge" class="lavora-badge" hidden></div>
+      <div class="theme" role="group" aria-label="Tema" data-i18n-aria="Tema">
+        <button type="button" data-theme-set="light" aria-pressed="false" data-i18n="Chiaro">Chiaro</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false" data-i18n="Scuro">Scuro</button>
+      </div>
+      <div class="theme lang" role="group" aria-label="Lingua" data-i18n-aria="Lingua">
+        <button type="button" data-lang-set="it" aria-pressed="true" lang="it">IT</button>
+        <button type="button" data-lang-set="en" aria-pressed="false" lang="en">EN</button>
+      </div>
+      <p class="version"><span data-i18n="Versione">Versione</span> __ORPHEUS_VERSION__</p>
+    </div>
+  </nav>
+  <main id="main" tabindex="-1">
+    <div id="view" aria-live="polite"></div>
+  </main>
+</div>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+  <div class="drawer-head">
+    <button type="button" class="icon-btn" id="drawer-close" aria-label="Chiudi il dettaglio" data-i18n-aria="Chiudi il dettaglio">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+<script src="/static/en.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
