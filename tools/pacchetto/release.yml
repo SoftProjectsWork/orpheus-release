@@ -36,27 +36,40 @@ jobs:
       - name: Prova - installazione da zero, esportazione, unione, aggiornamento
         shell: pwsh
         run: |
-          $zip = Get-ChildItem dist -Filter 'ORPHEUS_*_windows.zip' | Select-Object -First 1
-          Expand-Archive $zip.FullName -DestinationPath prova
-          $inst = Get-ChildItem prova -Recurse -Filter installa.ps1 | Select-Object -First 1
+          # In caso di errore il motivo e la coda dei registri vanno nelle annotazioni (leggibili anche dall'API).
+          function Report([string]$t) { Write-Host ("::error::" + ($t -replace '%','%25' -replace "`r",'' -replace "`n",'%0A')) }
           $env:ORPHEUS_INSTALL_ROOT = "$PWD\prova_pc\ORPHEUS"
           $env:ORPHEUS_INSTALL_DATI = "$PWD\prova_pc\ORPHEUS_DATI"
           $env:ORPHEUS_INSTALL_EMAIL = 'prova@example.org'
-          & $inst.FullName
-          if ($LASTEXITCODE -ne 0) { throw "installazione non riuscita" }
-          $py = "$env:ORPHEUS_INSTALL_ROOT\python\python.exe"
-          & $py -c "import onnxruntime, tokenizers, numpy, starlette, uvicorn, pypdf, pydantic, yaml, truststore; print('librerie ok')"
-          if ($LASTEXITCODE -ne 0) { throw "librerie mancanti" }
-          Push-Location "$env:ORPHEUS_INSTALL_ROOT\orpheus"
-          & $py -m orpheus condivisione-esporta
-          if ($LASTEXITCODE -ne 0) { throw "esportazione non riuscita" }
-          $pkg = Get-ChildItem "$env:ORPHEUS_INSTALL_DATI\condivisione" -Filter *.zip | Select-Object -First 1
-          & $py -m orpheus condivisione-unisci $pkg.FullName --prova
-          if ($LASTEXITCODE -ne 0) { throw "unione non riuscita" }
-          Pop-Location
-          & "$env:ORPHEUS_INSTALL_ROOT\aggiorna.ps1" -Pacchetto $zip.FullName
-          if ($LASTEXITCODE -ne 0) { throw "aggiornamento non riuscito" }
-          Get-Content "$env:ORPHEUS_INSTALL_ROOT\installazione_log.txt"
+          $out = ''
+          try {
+            $zip = Get-ChildItem dist -Filter 'ORPHEUS_*_windows.zip' | Select-Object -First 1
+            Expand-Archive $zip.FullName -DestinationPath prova
+            $inst = Get-ChildItem prova -Recurse -Filter installa.ps1 | Select-Object -First 1
+            $out = & $inst.FullName *>&1 | Out-String
+            Write-Host $out
+            if ($LASTEXITCODE -ne 0) { throw "installazione non riuscita (codice $LASTEXITCODE)" }
+            $py = "$env:ORPHEUS_INSTALL_ROOT\python\python.exe"
+            $out = & $py -c "import onnxruntime, tokenizers, numpy, starlette, uvicorn, pypdf, pydantic, yaml, truststore; print('librerie ok')" 2>&1 | Out-String
+            Write-Host $out
+            if ($LASTEXITCODE -ne 0) { throw "librerie mancanti" }
+            $out = & $py -m orpheus condivisione-esporta 2>&1 | Out-String
+            Write-Host $out
+            if ($LASTEXITCODE -ne 0) { throw "esportazione non riuscita" }
+            $pkg = Get-ChildItem "$env:ORPHEUS_INSTALL_DATI\condivisione" -Filter *.zip | Select-Object -First 1
+            $out = & $py -m orpheus condivisione-unisci $pkg.FullName --prova 2>&1 | Out-String
+            Write-Host $out
+            if ($LASTEXITCODE -ne 0) { throw "unione non riuscita" }
+            $out = & "$env:ORPHEUS_INSTALL_ROOT\aggiorna.ps1" -Pacchetto $zip.FullName *>&1 | Out-String
+            Write-Host $out
+            if ($LASTEXITCODE -ne 0) { throw "aggiornamento non riuscito" }
+            Write-Host "::notice::Prova del pacchetto riuscita"
+          } catch {
+            $log = Get-Content "$env:ORPHEUS_INSTALL_ROOT\installazione_log.txt" -Tail 40 -ErrorAction SilentlyContinue
+            $tail = ($out -split "`n" | Select-Object -Last 30) -join "`n"
+            Report ("$($_.Exception.Message)`n--- uscita ---`n$tail`n--- installazione_log.txt ---`n" + ($log -join "`n"))
+            exit 1
+          }
 
       - name: Pubblica la versione (se nuova)
         if: github.ref == 'refs/heads/main'
