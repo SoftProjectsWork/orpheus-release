@@ -1,12 +1,13 @@
 # Pacchetto Windows di ORPHEUS con Python incluso (T-053). Copiato qui da tools/pacchetto/release.yml del repository
 # privato con tools/pacchetto/pubblica.py: non modificarlo in questo repository.
-# Si avvia con un tag vX.Y.Z (lo mette Claude a ogni versione da distribuire) oppure a mano (Actions > Run workflow:
-# costruisce e prova il pacchetto senza pubblicarlo).
+# Si avvia a ogni push su main (lo fa Claude con pubblica.py a ogni versione da distribuire) o a mano (Actions > Run
+# workflow). Costruisce e prova il pacchetto; se la versione di pyproject.toml non e' ancora in Releases la pubblica
+# (il tag vX.Y.Z lo crea il workflow).
 name: Pacchetto Windows
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -57,12 +58,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "aggiornamento non riuscito" }
           Get-Content "$env:ORPHEUS_INSTALL_ROOT\installazione_log.txt"
 
-      - name: Pubblica la versione
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Pubblica la versione (se nuova)
+        if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $v = python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          $tag = "v$v"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Host "La versione $tag e' gia' pubblicata: niente da fare."; exit 0 }
           $zip = Get-ChildItem dist -Filter 'ORPHEUS_*_windows.zip' | Select-Object -First 1
           $notes = "Pacchetto per Windows con Python incluso. Prima installazione: scarica lo zip, estrai tutto, doppio clic su installa.cmd. Aggiornamento: doppio clic su C:\ORPHEUS\aggiorna.cmd."
-          gh release create "${{ github.ref_name }}" $zip.FullName --title "ORPHEUS ${{ github.ref_name }}" --notes $notes
+          gh release create $tag $zip.FullName --target $env:GITHUB_SHA --title "ORPHEUS $tag" --notes $notes

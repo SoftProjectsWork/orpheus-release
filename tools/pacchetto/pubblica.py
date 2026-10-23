@@ -4,8 +4,9 @@
 
 Only the files of costruisci.PUBLIC_FILES (code, migrations, configuration, double-click commands, package tools);
 never data, documents of the project, tests, the owner's installer or the log upload. Files that are no longer public
-are removed from the clone. Then, in the clone: git add -A, commit, tag vX.Y.Z, push with the tag: the workflow builds
-the Windows zip with Python and publishes it in Releases (aggiorna.cmd of the colleagues downloads it from there).
+are removed from the clone. Then, in the clone: git add -A, commit, push to main: the workflow builds the Windows zip
+with Python, tests it and, when the version of pyproject.toml is new, publishes it in Releases with the tag vX.Y.Z
+(aggiorna.cmd of the colleagues downloads it from there).
 """
 
 from __future__ import annotations
