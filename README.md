@@ -13,4 +13,4 @@ Questo repository contiene **solo il codice** distribuito ai colleghi: nessun da
 
 Le istruzioni complete sono in `tools/pacchetto/LEGGIMI.txt` (le trovi anche nello zip).
 
-Versione: 0.54.0
+Versione: 0.54.1

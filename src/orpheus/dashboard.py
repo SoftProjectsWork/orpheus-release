@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import socket
 import sqlite3
@@ -458,13 +459,13 @@ ACTIONS: dict[str, dict] = {
                      "passi": ["Controllo generale", "Prova di ripristino dell'ultima copia di sicurezza",
                                "Salute di ORPHEUS", "Report HTML"],
                      "descrizione": "Controlla il database e le copie di sicurezza; non modifica il database."},
-    "esporta_schede": {"titolo": "Esporta le schede per i colleghi", "sezione": "sistema", "gruppo": None,
+    "esporta_schede": {"titolo": "Esporta le schede per i colleghi", "sezione": "condivisione", "gruppo": None,
                        "scrive": False,
                        "passi": ["Schede delle riviste e degli articoli, metadati, pezzi di testo e vettori",
                                  "Un file .zip nella cartella condivisione dei dati (niente PDF, niente manoscritti)"],
                        "descrizione": "Il file da mandare ai colleghi con gli stessi accessi agli articoli. Contiene "
                        "testo di articoli non aperti: mai su GitHub. Non modifica il database."},
-    "importa_schede": {"titolo": "Importa le schede di un collega", "sezione": "sistema", "gruppo": None,
+    "importa_schede": {"titolo": "Importa le schede di un collega", "sezione": "condivisione", "gruppo": None,
                        "scrive": False, "finestra": True,
                        "passi": ["Prova: cosa entrerebbe e cosa hai già", "Dopo il tuo sì: copia di sicurezza e unione",
                                  "Quello che hai già resta tuo"],
@@ -662,6 +663,117 @@ def _health(s: Settings, conn, state: LocalState) -> dict:
     except Exception as exc:  # noqa: BLE001 — the page must still show the rest of the section
         return {"contratto": health.CONTRACT, "esito": "errore", "controlli": [],
                 "da_guardare": [f"Controllo della salute non riuscito: {exc}"], "controllato_il": utc_now()}
+
+
+# ---------------------------------------------------------------- condivisione con i colleghi (T-053, 0.54.1)
+
+SHARE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ ()-]{0,150}\.zip$")
+SHARE_MAX_BYTES = 1_000_000_000
+
+
+def _share_files(folder: Path) -> list[dict]:
+    if not folder.is_dir():
+        return []
+    out = []
+    for f in sorted(folder.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True):
+        st = f.stat()
+        out.append({"nome": f.name, "mb": round(st.st_size / 1e6, 1),
+                    "data": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime))})
+    return out
+
+
+def share_info(s: Settings) -> dict:
+    from . import sharing
+    out_dir, in_dir = s.home / sharing.FOLDER_OUT, s.home / sharing.FOLDER_IN
+    return {"creati": _share_files(out_dir), "ricevuti": _share_files(in_dir),
+            "cartella_creati": str(out_dir), "cartella_ricevuti": str(in_dir),
+            **_src("cartelle condivisione e inbox\\condivisione dei dati", utc_now())}
+
+
+def _share_guard(s: Settings, conn):
+    report = lineage.check(conn, LocalState(s.local_root))
+    if report.blocking:
+        raise ValueError(report.message)
+
+
+def share_export(s: Settings, conn) -> dict:
+    """Package for colleagues, made from the page (same as esporta_schede.cmd; the database does not change)."""
+    from . import sharing
+    _share_guard(s, conn)
+    res = sharing.export_package(conn, dest_dir=s.home / sharing.FOLDER_OUT)
+    return {"nome": Path(res["pacchetto"]).name, "pacchetto": res["pacchetto"], "dimensione_mb": res["dimensione_mb"],
+            "riepilogo": res["riepilogo"], "creato_il": res["creato_il"]}
+
+
+def share_file(s: Settings, name: str, *, received: bool = False) -> Path:
+    """A package of one of the two folders, by bare name only (nothing outside them can be reached)."""
+    from . import sharing
+    if not name or not SHARE_NAME.match(name) or Path(name).name != name:
+        raise ValueError("nome del file non valido")
+    path = s.home / (sharing.FOLDER_IN if received else sharing.FOLDER_OUT) / name
+    if not path.is_file():
+        raise FileNotFoundError(f"{name} non trovato")
+    return path
+
+
+def share_upload(s: Settings, name: str, data: bytes) -> dict:
+    """A package chosen in the browser: saved in inbox\\condivisione after checking it is a package of ORPHEUS."""
+    import tempfile
+    from . import sharing
+    name = Path(name or "").name
+    if not SHARE_NAME.match(name):
+        raise ValueError("scegli il file .zip ricevuto dal collega (ORPHEUS_condivisione_….zip)")
+    if not data:
+        raise ValueError("il file è vuoto")
+    if len(data) > SHARE_MAX_BYTES:
+        raise ValueError("il file è troppo grande per un pacchetto di condivisione")
+    folder = s.home / sharing.FOLDER_IN
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / name
+    if target.exists() and target.read_bytes() != data:
+        stem, n = target.stem, 2
+        while (folder / f"{stem} ({n}).zip").exists():
+            n += 1
+        target = folder / f"{stem} ({n}).zip"
+    partial = target.with_name(target.name + ".partial")
+    partial.write_bytes(data)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, _db = sharing.read_package(partial, Path(tmp))
+    except sharing.SharingError:
+        partial.unlink(missing_ok=True)
+        raise
+    partial.replace(target)
+    return {"nome": target.name, "creato_il": manifest.get("creato_il"), "riepilogo": manifest.get("riepilogo")}
+
+
+def share_merge(s: Settings, conn, name: str, *, trial: bool) -> dict:
+    """Trial or real merge of a received package; the real one makes a backup first (keep yours)."""
+    from . import backups as backup_mod
+    from . import sharing
+    path = share_file(s, name, received=True)
+    if trial:
+        _share_guard(s, conn)
+        res = sharing.merge_package(conn, path, dry_run=True)
+        return {**res, "nome": name}
+
+    def write():
+        entry = backup_mod.make_backup(conn, LocalState(s.local_root), reason="prima di condivisione-unisci (cruscotto)")
+        res = sharing.merge_package(conn, path)
+        return {**res, "nome": name, "copia_di_sicurezza": str(LocalState(s.local_root).backup_dir / entry["file"]),
+                "controllo": db.integrity_check(conn)}
+    return _protected_write(s, conn, write)
+
+
+def open_in_folder(path: Path) -> tuple[bool, str]:
+    """Shows the file in Explorer (Windows); elsewhere only says where it is."""
+    if os.name != "nt":
+        return False, str(path)
+    try:
+        subprocess.Popen(["explorer", f"/select,{path}"])
+    except OSError as exc:
+        return False, f"cartella non aperta: {exc}"
+    return True, str(path)
 
 
 def system(s: Settings, conn) -> dict:
@@ -979,6 +1091,73 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         finally:
             conn.close()
 
+    async def share_post(request: Request, fn, *, needs_db: bool = True):
+        from . import sharing
+        if request.headers.get("x-orpheus-token") != token:
+            return JSONResponse({"errore": "token mancante o sbagliato"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:                                                # noqa: BLE001
+            body = {}
+        body = body if isinstance(body, dict) else {}
+        conn = None
+        try:
+            if needs_db:
+                conn = s.connect()
+            return JSONResponse(fn(conn, body))
+        except FileNotFoundError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404 if not needs_db or conn else 503)
+        except (sharing.SharingError,) as exc:
+            return JSONResponse({"errore": exc.message}, status_code=422)
+        except (ValueError, rv_error()) as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=422)
+        except sqlite3.DatabaseError as exc:
+            return JSONResponse({"errore": f"il database ha rifiutato la modifica: {exc}"}, status_code=422)
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def rv_error():
+        from .eurydike import review as rv
+        return rv.ReviewError
+
+    async def share_export_endpoint(request: Request):
+        return await share_post(request, lambda c, b: share_export(s, c))
+
+    async def share_merge_endpoint(request: Request):
+        return await share_post(request, lambda c, b: share_merge(s, c, str(b.get("nome") or ""),
+                                                                  trial=bool(b.get("prova", True))))
+
+    async def share_show_endpoint(request: Request):
+        def show(_c, b):
+            ok, where = open_in_folder(share_file(s, str(b.get("nome") or ""), received=bool(b.get("ricevuto"))))
+            return {"aperta": ok, "percorso": where}
+        return await share_post(request, show, needs_db=False)
+
+    async def share_upload_endpoint(request: Request):
+        from . import sharing
+        if request.headers.get("x-orpheus-token") != token:
+            return JSONResponse({"errore": "token mancante o sbagliato"}, status_code=403)
+        size = int(request.headers.get("content-length") or 0)
+        if size > SHARE_MAX_BYTES:
+            return JSONResponse({"errore": "il file è troppo grande per un pacchetto di condivisione"}, status_code=413)
+        data = await request.body()
+        from urllib.parse import unquote
+        try:
+            return JSONResponse(share_upload(s, unquote(request.headers.get("x-nome-file") or ""), data))
+        except sharing.SharingError as exc:
+            return JSONResponse({"errore": exc.message}, status_code=422)
+        except ValueError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=422)
+
+    def share_download_endpoint(request: Request):
+        from starlette.responses import FileResponse
+        try:
+            path = share_file(s, request.query_params.get("nome") or "")
+        except (ValueError, FileNotFoundError) as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+        return FileResponse(path, media_type="application/zip", filename=path.name)
+
     async def new_review_endpoint(request: Request):
         return await eurydike_post(request, lambda c, b: eurydike_new_review(s, c, b))
 
@@ -1081,6 +1260,12 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         Route("/api/azioni/avvia", start_action, methods=["POST"]),
         Route("/api/azioni/uscita", lavora_output),
         Route("/api/sistema", with_db(lambda r, c: system(s, c))),
+        Route("/api/condivisione", lambda r: JSONResponse(share_info(s))),
+        Route("/api/condivisione/esporta", share_export_endpoint, methods=["POST"]),
+        Route("/api/condivisione/carica", share_upload_endpoint, methods=["POST"]),
+        Route("/api/condivisione/unisci", share_merge_endpoint, methods=["POST"]),
+        Route("/api/condivisione/mostra", share_show_endpoint, methods=["POST"]),
+        Route("/api/condivisione/scarica", share_download_endpoint),
         Route("/api/eurydike/revisioni", with_db(lambda r, c: eurydike_reviews(c))),
         Route("/api/eurydike/nuova", new_review_endpoint, methods=["POST"]),
         Route("/api/eurydike/strumenti", lambda r: JSONResponse(eurydike_tools())),

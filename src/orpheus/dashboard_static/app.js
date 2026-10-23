@@ -1032,7 +1032,7 @@ function follow(consoleBox, stateLine, startBtn) {
 const badge = document.getElementById("lavora-badge");
 const SECTION_OF = {aggiorna_articoli: "articoli", pacchetti: "articoli", chat_schede: "articoli", invia_schede_chat: "articoli",
   aggiorna_riviste: "riviste", invia_lavoro_claude: "affermazioni",
-  prepara_manoscritto: "manoscritti", manutenzione: "sistema", esporta_schede: "sistema", importa_schede: "sistema",
+  prepara_manoscritto: "manoscritti", manutenzione: "sistema", esporta_schede: "condivisione", importa_schede: "condivisione",
   lavora: "lavora"};
 badge.addEventListener("click", () => go(badge.dataset.sec || "lavora"));
 function updateBadge(snap) {
@@ -1056,13 +1056,116 @@ function healthBlock(sa) {
     h("p", {class: "src"}, `Fonte: orpheus salute (${sa.contratto}), controllato il ${fmtDate(sa.controllato_il)}. Sola lettura.`));
 }
 
+/* ------------------------------------------------------------------ condivisione con i colleghi (T-053, 0.54.1) */
+
+function shareCounts(rows) {
+  return h("dl", {class: "kv"}, rows.filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [h("dt", null, k), h("dd", null, fmtN(v))]));
+}
+function shareFileLine(f, received, onTrial) {
+  const btns = received
+    ? [h("button", {class: "btn small", type: "button", onclick: () => onTrial(f.nome)}, "Prova l'unione")]
+    : [h("a", {class: "btn small", href: `/api/condivisione/scarica?nome=${encodeURIComponent(f.nome)}`, download: f.nome}, "Scarica"),
+       h("button", {class: "btn small", type: "button", onclick: (e) => shareShow(f.nome, false, e.currentTarget.parentNode)}, "Mostra nella cartella")];
+  return h("li", null, h("b", null, f.nome), ` · ${fmtN(f.mb)} MB · ${fmtDate(f.data)} `, ...btns);
+}
+async function shareShow(nome, received, where) {
+  try {
+    const r = await postJson("/api/condivisione/mostra", {nome, ricevuto: received});
+    if (!r.aperta) where.append(h("div", {class: "t-sub"}, `${t("Il file è in")} ${r.percorso}`));
+  } catch (e) { where.append(h("div", {class: "t-sub"}, e.message)); }
+}
+
+function shareExportBlock(d) {
+  const out = h("div", {role: "status"});
+  const btn = h("button", {class: "btn primary", type: "button", onclick: async () => {
+    btn.disabled = true;
+    put(out, h("p", {class: "loading"}, "Preparo il file (può volerci un minuto)…"));
+    try {
+      const r = await postJson("/api/condivisione/esporta");
+      const x = r.riepilogo;
+      put(out, h("p", {class: "notice"}, "File pronto."),
+        shareCounts([["Riviste", x.riviste], ["Schede delle riviste", x.schede_riviste], ["Articoli", x.articoli],
+          ["Schede degli articoli", x.schede_articoli], ["Pezzi di testo", x.pezzi_di_testo], ["Affermazioni", x.affermazioni],
+          ["Dimensione (MB)", r.dimensione_mb]]),
+        h("p", null, h("b", null, r.nome), " ",
+          h("a", {class: "btn small", href: `/api/condivisione/scarica?nome=${encodeURIComponent(r.nome)}`, download: r.nome}, "Scarica"), " ",
+          h("button", {class: "btn small", type: "button", onclick: (e) => shareShow(r.nome, false, e.currentTarget.parentNode)}, "Mostra nella cartella")));
+    } catch (e) { put(out, h("div", {class: "error", role: "alert"}, e.message)); }
+    btn.disabled = false;
+  }}, "Crea il file per i colleghi");
+  const old = d.creati.slice(0, 3);
+  return h("section", {class: "block"}, h("h2", null, "Esporta per i colleghi"),
+    h("p", null, "Un file .zip con le schede delle riviste e degli articoli, i metadati, i pezzi di testo e le affermazioni. Il database non cambia."),
+    h("p", {class: "t-sub"}, "Contiene testo di articoli non aperti: mandalo solo a colleghi con gli stessi accessi, mai su internet o GitHub."),
+    btn, out,
+    old.length ? [h("h3", null, "File già creati"), h("ul", {class: "plain"}, old.map((f) => shareFileLine(f, false)))] : null);
+}
+
+function shareImportBlock(d) {
+  const out = h("div", {role: "status"});
+  async function trial(nome) {
+    put(out, h("p", {class: "loading"}, "Controllo cosa entrerebbe…"));
+    try {
+      const r = await postJson("/api/condivisione/unisci", {nome, prova: true});
+      const x = r.riepilogo;
+      const nothing = !Object.keys(r.nuove || {}).length;
+      const go = h("button", {class: "btn primary", type: "button", onclick: async () => {
+        go.disabled = true;
+        put(out, h("p", {class: "loading"}, "Copia di sicurezza e unione in corso…"));
+        try {
+          const m = await postJson("/api/condivisione/unisci", {nome, prova: false});
+          const y = m.riepilogo;
+          put(out, h("p", {class: "notice"}, "Importato."),
+            shareCounts([["Riviste nuove", y.riviste_nuove], ["Schede delle riviste nuove", y.schede_riviste_nuove],
+              ["Articoli nuovi", y.articoli_nuovi], ["Schede degli articoli nuove", y.schede_articoli_nuove],
+              ["Pezzi di testo nuovi", y.pezzi_di_testo_nuovi], ["Righe che non sono entrate", m.problemi_totali]]),
+            h("p", {class: "t-sub"}, `${t("Copia di sicurezza")}: ${m.copia_di_sicurezza}`),
+            h("p", {class: "t-sub"}, `${t("Controllo del database")}: ${m.controllo.integrity}, ${t("collegamenti rotti")} ${m.controllo.foreign_key_violations}`));
+          clearCache();
+        } catch (e) { put(out, h("div", {class: "error", role: "alert"}, e.message)); }
+      }}, "Importa adesso");
+      put(out, h("p", null, h("b", null, nome), r.creato_il ? ` · ${t("creato il")} ${fmtDate(r.creato_il)}` : ""),
+        shareCounts([["Riviste nuove", x.riviste_nuove], ["Schede delle riviste nuove", x.schede_riviste_nuove],
+          ["Articoli nuovi", x.articoli_nuovi], ["Schede degli articoli nuove", x.schede_articoli_nuove],
+          ["Pezzi di testo nuovi", x.pezzi_di_testo_nuovi], ["Schede che hai già (restano le tue)", x.schede_gia_presenti_tenute_le_tue],
+          ["Righe che non possono entrare", r.problemi_totali]]),
+        nothing ? h("p", {class: "notice"}, "Niente di nuovo: hai già tutto quello che c'è nel file.")
+          : [h("p", {class: "t-sub"}, "Prima dell'unione viene fatta una copia di sicurezza del database. Quello che hai già non cambia."), go]);
+    } catch (e) { put(out, h("div", {class: "error", role: "alert"}, e.message)); }
+  }
+  const input = h("input", {type: "file", accept: ".zip", id: "share-file", class: "file-hidden", onchange: async () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    put(out, h("p", {class: "loading"}, "Copio il file nella cartella dei dati…"));
+    try {
+      const r = await api("/api/condivisione/carica", {method: "POST", body: f,
+        headers: {"X-Orpheus-Token": TOKEN, "X-Nome-File": encodeURIComponent(f.name), "Content-Type": "application/zip"}});
+      input.value = "";
+      await trial(r.nome);
+    } catch (e) { put(out, h("div", {class: "error", role: "alert"}, e.message)); }
+  }});
+  const rec = d.ricevuti.slice(0, 5);
+  return h("section", {class: "block"}, h("h2", null, "Importa da un collega"),
+    h("p", null, "Scegli il file .zip ricevuto: ORPHEUS ti mostra cosa entrerebbe e chiede conferma. Quello che hai già resta tuo."),
+    h("p", null, input, h("label", {for: "share-file", class: "btn primary file-pick"}, "Scegli il file .zip del collega")),
+    out,
+    rec.length ? [h("h3", null, "File ricevuti"), h("ul", {class: "plain"}, rec.map((f) => shareFileLine(f, true, trial)))] : null);
+}
+
+sections.condivisione = async () => {
+  const d = await api("/api/condivisione");
+  put(view, ...head("Condivisione", "Scambia con i colleghi le schede delle riviste e degli articoli, i metadati e i pezzi di testo. Niente PDF, niente manoscritti.",
+    h("button", {class: "btn", type: "button", onclick: () => route()}, "Aggiorna")),
+    h("div", {class: "cols"}, shareExportBlock(d), shareImportBlock(d)),
+    h("p", {class: "src"}, `${t("Cartelle")}: ${d.cartella_creati} · ${d.cartella_ricevuti}`));
+};
+
 sections.sistema = async () => {
   const d = await api("/api/sistema");
   const cc = d.controllo_copia;
   const applied = d.migrazioni.filter((m) => m.stato === "applied").length;
   put(view, ...head("Sistema", "Dove sono i dati, se la copia del database è quella giusta, le copie di sicurezza e il budget.",
     h("button", {class: "btn", type: "button", onclick: () => route()}, "Aggiorna")), await actionBlock("manutenzione"),
-    await actionBlock("esporta_schede"), await actionBlock("importa_schede"),
     healthBlock(d.salute),
     h("div", {class: "cols"},
       h("section", {class: "block"}, h("h2", null, "Database"), h("dl", {class: "kv"},
@@ -1196,7 +1299,7 @@ for (const b of document.querySelectorAll("[data-lang-set]")) b.addEventListener
 const SHARED = ["lavora", "sistema"];
 const NAV = {
   orpheus: [["panoramica", "Panoramica"], ["articoli", "Articoli"], ["riviste", "Riviste"], ["manoscritti", "Manoscritti"],
-    ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["lavora", "Lavora"], ["sistema", "Sistema"]],
+    ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["lavora", "Lavora"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
   eurydike: [["eurydike/panoramica", "Panoramica"], ["eurydike/protocollo", "Protocollo"], ["eurydike/screening", "Screening"],
     ["eurydike/fulltext", "Full text"], ["eurydike/estrazione", "Estrazione (schede)"], ["eurydike/bias", "Rischio di bias"],
     ["eurydike/consenso", "Consenso"], ["eurydike/meta", "Meta-analisi"], ["eurydike/esporta", "Esporta"], null,

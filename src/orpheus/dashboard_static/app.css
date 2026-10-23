@@ -385,3 +385,9 @@ html[data-theme="dark"] body[data-module="eurydike"]{--accent:#f08a82;--accent-i
 .fld>span{color:var(--ink-2);font-weight:700}
 .eur-bar>.btn.small{margin-left:auto}
 .eur-bar .fld.inline+.btn.small{margin-left:0}
+/* Condivisione con i colleghi (T-053) */
+ul.plain{list-style:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:8px 0;border-top:1px solid var(--rule);display:flex;flex-wrap:wrap;align-items:center;gap:6px;overflow-wrap:anywhere}
+a.btn{color:var(--ink);text-decoration:none}
+input.file-hidden{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+input.file-hidden:focus-visible+label.file-pick{outline:2px solid var(--accent);outline-offset:2px}
