@@ -114,7 +114,7 @@ $copied = 0
 foreach ($f in @(Get-ChildItem $tools -File)) { Copy-Item -Force $f.FullName (Join-Path $Root $f.Name); $copied++ }
 $pk = Join-Path $CodeDir 'tools\pacchetto'
 if (-not (Test-Path $pk)) { $pk = Join-Path $CodeDir 'tools/pacchetto' }
-foreach ($f in @('aggiorna.cmd', 'aggiorna.ps1', 'LEGGIMI.txt')) {
+foreach ($f in @('aggiorna.cmd', 'aggiorna.ps1', 'LEGGIMI.txt', 'GUIDA_ORPHEUS.html')) {
     if (Test-Path (Join-Path $pk $f)) { Copy-Item -Force (Join-Path $pk $f) (Join-Path $Root $f); $copied++ }
 }
 Set-Content -Path (Join-Path $Root 'VERSIONE.txt') -Value $Version -Encoding UTF8
@@ -142,5 +142,6 @@ Write-Log "FATTO: ORPHEUS $Version installato in $Root."
 Write-Log "  Cruscotto: doppio clic su ORPHEUS sul desktop (o $Root\cruscotto.cmd)."
 Write-Log "  Schede di un collega: metti il file .zip in $home_\inbox\condivisione e doppio clic su $Root\importa_schede.cmd."
 Write-Log "  Aggiornamenti: doppio clic su $Root\aggiorna.cmd."
+Write-Log "  Guida illustrata: $Root\GUIDA_ORPHEUS.html (si apre con il browser)."
 Write-Log "Registro: $LogFile"
 exit 0

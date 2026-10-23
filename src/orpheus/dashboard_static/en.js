@@ -175,6 +175,8 @@ self.ORPHEUS_EN = {
   "Crea il file per i colleghi": "Create the file for colleagues", "Scarica": "Download", "Mostra nella cartella": "Show in folder",
   "Prova l'unione": "Try the merge", "Importa adesso": "Import now", "File già creati": "Files already made",
   "File ricevuti": "Files received", "Scegli il file .zip del collega": "Choose the colleague's .zip file", "File pronto.": "File ready.", "Importato.": "Imported.",
+  "Valori delle schede uniche (EURYDIKE)": "Values of the single cards (EURYDIKE)",
+  "Vale per ORPHEUS ed EURYDIKE: le schede uniche degli articoli (Estrazione di EURYDIKE) viaggiano con le altre schede. Le revisioni sistematiche (protocollo, screening, decisioni) restano sul tuo PC.": "For ORPHEUS and EURYDIKE: the single cards of the articles (EURYDIKE Extraction) travel with the other cards. Systematic reviews (protocol, screening, decisions) stay on your PC.",
   "Preparo il file (può volerci un minuto)…": "Preparing the file (it may take a minute)…",
   "Controllo cosa entrerebbe…": "Checking what would come in…", "Copia di sicurezza e unione in corso…": "Backup and merge in progress…",
   "Copio il file nella cartella dei dati…": "Copying the file into the data folder…",

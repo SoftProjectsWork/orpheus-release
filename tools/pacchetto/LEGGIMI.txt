@@ -3,6 +3,7 @@ ORPHEUS - installazione per i colleghi
 
 ORPHEUS raccoglie articoli scientifici, schede delle riviste e degli articoli, e aiuta a preparare i manoscritti.
 Questo pacchetto contiene il programma e Python: non serve installare nient'altro, non serve un account.
+La guida illustrata e' GUIDA_ORPHEUS.html (doppio clic: si apre nel browser).
 
 INSTALLARE (la prima volta)
 1. Estrai TUTTO lo zip (tasto destro > Estrai tutto...).

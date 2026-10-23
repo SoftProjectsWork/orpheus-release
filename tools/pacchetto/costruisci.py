@@ -142,7 +142,7 @@ def build(python_zip: Path, out: Path, *, repo: Path = REPO, pip_extra: list[str
     setup_python(python_zip, app / "python")
     if libraries:
         install_libraries(requirements(repo), app / "python" / "Lib" / "site-packages", pip_extra=pip_extra)
-    for f in ("installa.cmd", "installa.ps1", "LEGGIMI.txt"):
+    for f in ("installa.cmd", "installa.ps1", "LEGGIMI.txt", "GUIDA_ORPHEUS.html"):
         shutil.copy2(HERE / f, stage / f)
     zpath = out / f"{name}.zip"
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:

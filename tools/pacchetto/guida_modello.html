@@ -1,0 +1,258 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Guida di ORPHEUS</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one reading column; each stage of use is a band with a step strip (installa → aggiorna → condividi),
+   then two reference tables. Same tokens and faces as the ORPHEUS dashboard. Fonts embedded: works offline too. */
+@font-face{font-family:"Atkinson Hyperlegible";src:url(data:font/woff2;base64,__SANS400__) format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"Atkinson Hyperlegible";src:url(data:font/woff2;base64,__SANS700__) format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"Source Serif 4";src:url(data:font/woff2;base64,__SERIF600__) format("woff2");font-weight:600;font-display:swap}
+:root{
+  color-scheme:light;
+  --bg:#eef1ef; --panel:#ffffff; --sunk:#f5f7f6;
+  --ink:#1c2326; --ink-2:#4e5a5f; --ink-3:#5c666a;
+  --rule:#d5dcd9;
+  --accent:#0d6b58; --accent-ink:#ffffff; --accent-soft:#dcefe9; --accent-line:#9fd1c3;
+  --eur:#b3261e; --eur-soft:#f7e3e1;
+  --no:#a52a2a; --no-soft:#f6e4e2;
+  --serif:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans:"Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono:ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#111415; --panel:#1a1d1e; --sunk:#151819;
+  --ink:#e9edeb; --ink-2:#b4bfbd; --ink-3:#97a3a1; --rule:#2c3335;
+  --accent:#46c2a3; --accent-ink:#0b1a17; --accent-soft:#12302a; --accent-line:#24594d;
+  --eur:#ef8a82; --eur-soft:#3a1d1b; --no:#ec7e7e; --no-soft:#341d1c;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#111415; --panel:#1a1d1e; --sunk:#151819;
+  --ink:#e9edeb; --ink-2:#b4bfbd; --ink-3:#97a3a1; --rule:#2c3335;
+  --accent:#46c2a3; --accent-ink:#0b1a17; --accent-soft:#12302a; --accent-line:#24594d;
+  --eur:#ef8a82; --eur-soft:#3a1d1b; --no:#ec7e7e; --no-soft:#341d1c;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans);margin:0}
+.wrap{max-width:980px;margin:0 auto;padding-block:32px 56px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));display:grid;gap:28px}
+h1,h2,h3{font-family:var(--serif);font-weight:600;text-wrap:balance;margin:0}
+h1{font-size:clamp(30px,5vw,42px);line-height:1.1}
+h2{font-size:clamp(22px,3.4vw,28px);line-height:1.2}
+h3{font-size:17px;font-family:var(--sans);font-weight:700}
+p{margin:0}
+.lede{color:var(--ink-2);max-width:65ch;font-size:17px}
+.eyebrow{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);font-weight:700}
+code,.path{font-family:var(--mono);font-size:.92em;background:var(--sunk);border:1px solid var(--rule);border-radius:5px;padding:1px 5px;overflow-wrap:anywhere}
+
+/* masthead */
+.mast{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.logo{width:56px;height:56px;border-radius:14px;background:var(--accent);display:grid;place-items:center;flex:none}
+.logo svg{width:34px;height:34px}
+.mast .txt{display:grid;gap:6px;min-width:0;flex:1 1 300px}
+
+/* map of the three moments */
+.map{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.moment{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:16px;display:grid;gap:6px;align-content:start}
+.moment b{font-family:var(--serif);font-size:19px}
+.moment .when{font-size:13px;color:var(--ink-3)}
+.moment .cmd{font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:700}
+
+/* bands */
+section.band{background:var(--panel);border:1px solid var(--rule);border-radius:14px;padding:24px;display:grid;gap:18px;align-content:start;min-width:0}
+.band-head{display:grid;gap:6px}
+.who{display:inline-flex;gap:8px;flex-wrap:wrap}
+.chip{font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line)}
+.chip.eur{background:var(--eur-soft);color:var(--eur);border-color:var(--eur)}
+
+/* step strip: a real sequence, so it is numbered */
+ol.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(var(--n,4),minmax(0,1fr));gap:0;counter-reset:s}
+ol.steps>li{position:relative;padding:0 20px 0 0;display:grid;gap:8px;align-content:start;counter-increment:s;min-width:0}
+ol.steps>li::before{content:counter(s);width:34px;height:34px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;font-variant-numeric:tabular-nums;position:relative;z-index:1}
+ol.steps>li::after{content:"";position:absolute;top:17px;left:34px;right:0;height:2px;background:var(--accent-line)}
+ol.steps>li:last-child::after{display:none}
+ol.steps b{font-size:15px}
+ol.steps span{font-size:14px;color:var(--ink-2);min-width:0}
+ol.steps code{word-break:break-all}
+.screen{border:1px solid var(--rule);border-radius:8px;background:var(--sunk);padding:8px 10px;font-size:13px;display:grid;gap:4px}
+.screen .btn{justify-self:start;background:var(--accent);color:var(--accent-ink);border-radius:6px;padding:3px 9px;font-weight:700;font-size:12px}
+.screen .q{color:var(--ink-3)}
+
+/* exchange diagram */
+.exchange{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1.1fr) auto minmax(0,1fr);gap:12px;align-items:center}
+.pc{border:1px solid var(--rule);border-radius:12px;padding:14px;background:var(--sunk);display:grid;gap:8px;min-width:0}
+.pc h3{display:flex;gap:8px;align-items:center}
+.pc ol{margin:0;padding-left:20px;font-size:14px;color:var(--ink-2);display:grid;gap:4px}
+.file{border:2px dashed var(--accent);border-radius:12px;padding:14px;display:grid;gap:6px;text-align:center;justify-items:center;min-width:0}
+.file svg{width:42px;height:48px}
+.file .name{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.file .via{font-size:13px;color:var(--ink-3)}
+.arrow{width:38px;height:20px;color:var(--accent)}
+.rule-box{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:12px 14px;display:grid;gap:4px}
+.rule-box.warn{border-color:var(--no);background:var(--no-soft)}
+
+/* tables */
+.tables{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.yes,.nope{font-weight:700;white-space:nowrap}
+.yes{color:var(--accent)}
+.nope{color:var(--no)}
+.tree{font-family:var(--mono);font-size:13px;line-height:1.7;background:var(--sunk);border:1px solid var(--rule);border-radius:10px;padding:12px 14px;overflow-x:auto;white-space:pre;margin:0}
+.tree em{font-style:normal;color:var(--ink-3)}
+.help{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.help div{border-top:3px solid var(--accent-line);padding-top:10px;display:grid;gap:4px;font-size:14px;color:var(--ink-2)}
+.help b{color:var(--ink)}
+.foot{font-size:13px;color:var(--ink-3)}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+@media (max-width:760px){
+  .map,.tables,.help{grid-template-columns:1fr}
+  ol.steps{grid-template-columns:1fr;gap:16px}
+  ol.steps>li{grid-template-columns:34px minmax(0,1fr);column-gap:12px;padding:0}
+  ol.steps>li>*{grid-column:2}
+  ol.steps>li::before{grid-row:1 / span 3;grid-column:1}
+  ol.steps>li::after{top:34px;bottom:-16px;left:16px;right:auto;width:2px;height:auto}
+  .exchange{grid-template-columns:1fr}
+  .arrow{transform:rotate(90deg);justify-self:center}
+  section.band{padding:18px}
+}
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6.5C11.9 6.5 13.5 10.1 13.1 13.6C12.8 16.4 11 18.9 7.5 20M24 6.5C20.1 6.5 18.5 10.1 18.9 13.6C19.2 16.4 21 18.9 24.5 20M7.5 20H24.5M16 20V26.5"/></svg>
+    </div>
+    <div class="txt">
+      <span class="eyebrow">Guida per i colleghi · Windows</span>
+      <h1>Guida di ORPHEUS</h1>
+      <p class="lede">Installare il programma, tenerlo aggiornato e scambiarsi le schede di riviste e articoli. Non serve un account, non serve installare Python: è tutto nel pacchetto.</p>
+    </div>
+  </header>
+
+  <nav class="map" aria-label="I tre momenti">
+    <a class="moment" href="#installa" style="text-decoration:none;color:inherit"><span class="when">Una volta, la prima</span><b>Installa</b><span class="cmd">installa.cmd</span></a>
+    <a class="moment" href="#aggiorna" style="text-decoration:none;color:inherit"><span class="when">Quando esce una versione nuova</span><b>Aggiorna</b><span class="cmd">aggiorna.cmd</span></a>
+    <a class="moment" href="#condividi" style="text-decoration:none;color:inherit"><span class="when">Quando vuoi scambiare le schede</span><b>Condividi</b><span class="cmd">Cruscotto › Condivisione</span></a>
+  </nav>
+
+  <section class="band" id="installa">
+    <div class="band-head">
+      <span class="eyebrow">Prima volta</span>
+      <h2>Installare ORPHEUS</h2>
+      <p class="lede">Circa 5 minuti. Il pacchetto pesa 67 MB e contiene il programma e Python.</p>
+    </div>
+    <ol class="steps" style="--n:4">
+      <li><b>Scarica lo zip</b><span>Dalla pagina Releases del repository pubblico scarica <code>ORPHEUS_&lt;versione&gt;_windows.zip</code>.</span>
+        <div class="screen"><span class="q">github.com/SoftProjectsWork/orpheus-release</span><span>Releases › Latest › Assets</span></div></li>
+      <li><b>Estrai tutto</b><span>Tasto destro sullo zip › <em>Estrai tutto…</em>. Non lanciarlo da dentro lo zip.</span></li>
+      <li><b>Doppio clic su installa.cmd</b><span>Se compare <em>Windows ha protetto il PC</em>: Ulteriori informazioni › Esegui comunque.</span></li>
+      <li><b>Rispondi a due domande</b>
+        <div class="screen"><span class="q">Cartella dei dati</span><span>Invio = <code>C:\ORPHEUS_DATI</code></span><span class="q">La tua e-mail</span><span>per Crossref e OpenAlex, resta sul PC</span></div></li>
+    </ol>
+    <div class="rule-box"><b>Alla fine</b><span>Sul desktop trovi l'icona <b>ORPHEUS</b>: apre il cruscotto nel browser. I comandi sono in <code>C:\ORPHEUS</code>. La cartella estratta dallo zip si può cancellare.</span></div>
+  </section>
+
+  <section class="band" id="aggiorna">
+    <div class="band-head">
+      <span class="eyebrow">Ogni nuova versione</span>
+      <h2>Aggiornare</h2>
+      <p class="lede">Un doppio clic. Serve internet. I tuoi dati non vengono toccati.</p>
+    </div>
+    <ol class="steps" style="--n:4">
+      <li><b>Chiudi ORPHEUS</b><span>Chiudi la finestra del cruscotto e gli altri comandi aperti.</span></li>
+      <li><b>Doppio clic su aggiorna.cmd</b><span>In <code>C:\ORPHEUS</code>. Controlla su GitHub l'ultima versione.</span>
+        <div class="screen"><span>ORPHEUS installato: versione 0.54.1</span><span class="q">Ultima versione pubblicata: …</span></div></li>
+      <li><b>Scarica e installa</b><span>Se c'è una versione nuova la scarica e la installa da sola. Se no scrive <em>Hai già l'ultima versione</em>.</span></li>
+      <li><b>Database aggiornato</b><span>Se la struttura cambia, prima fa una copia di sicurezza in <code>C:\ORPHEUS\locale</code>.</span></li>
+    </ol>
+  </section>
+
+  <section class="band" id="condividi">
+    <div class="band-head">
+      <span class="eyebrow">Tra colleghi</span>
+      <h2>Condividere le schede</h2>
+      <p class="lede">Un file .zip passa da un PC all'altro. Vale per ORPHEUS ed EURYDIKE: nel menu di entrambi c'è <b>Condivisione</b>.</p>
+      <div class="who"><span class="chip">ORPHEUS</span><span class="chip eur">EURYDIKE</span></div>
+    </div>
+    <div class="exchange">
+      <div class="pc">
+        <h3>Chi manda</h3>
+        <ol>
+          <li>Cruscotto › <b>Condivisione</b></li>
+          <li><b>Crea il file per i colleghi</b></li>
+          <li><b>Mostra nella cartella</b> (o Scarica)</li>
+        </ol>
+      </div>
+      <svg class="arrow" viewBox="0 0 38 20" aria-hidden="true"><path d="M2 10h30M24 3l8 7-8 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="file">
+        <svg viewBox="0 0 42 48" aria-hidden="true"><path d="M4 3h22l12 12v30H4z" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round"/><path d="M26 3v12h12" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round"/><path d="M14 22h6M14 28h6M14 34h6" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/></svg>
+        <span class="name">ORPHEUS_condivisione_&lt;data&gt;.zip</span>
+        <span class="via">mail, chiavetta o cartella condivisa · circa 25 MB</span>
+      </div>
+      <svg class="arrow" viewBox="0 0 38 20" aria-hidden="true"><path d="M2 10h30M24 3l8 7-8 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="pc">
+        <h3>Chi riceve</h3>
+        <ol>
+          <li>Cruscotto › <b>Condivisione</b></li>
+          <li><b>Scegli il file .zip del collega</b></li>
+          <li>Guarda la prova, poi <b>Importa adesso</b></li>
+        </ol>
+      </div>
+    </div>
+    <div class="rule-box"><b>Quello che hai già resta tuo</b><span>Lo stesso articolo (DOI), la stessa rivista (ISSN), lo stesso PDF non cambiano. Una scheda arriva solo se tu non ce l'hai. Prima dell'unione c'è sempre una copia di sicurezza. Importare due volte lo stesso file non aggiunge nulla.</span></div>
+    <div class="rule-box warn"><b>Il file contiene testo di articoli non aperti</b><span>Mandalo solo a colleghi con gli stessi accessi agli articoli. Mai su internet, mai su GitHub.</span></div>
+    <p class="foot">Senza cruscotto: <code>esporta_schede.cmd</code> e <code>importa_schede.cmd</code> in <code>C:\ORPHEUS</code> (si può trascinare lo zip sopra <code>importa_schede.cmd</code>).</p>
+  </section>
+
+  <div class="tables">
+    <section class="band">
+      <h2>Cosa viaggia nel file</h2>
+      <div class="tbl"><table>
+        <thead><tr><th>Contenuto</th><th>Nel file</th></tr></thead>
+        <tbody>
+          <tr><td>Schede delle riviste e dei loro valori</td><td class="yes">sì</td></tr>
+          <tr><td>Schede degli articoli e schede uniche (Estrazione di EURYDIKE)</td><td class="yes">sì</td></tr>
+          <tr><td>Metadati: articoli, autori, MeSH, riferimenti, metriche</td><td class="yes">sì</td></tr>
+          <tr><td>Pezzi di testo per la ricerca e affermazioni</td><td class="yes">sì</td></tr>
+          <tr><td>File PDF e loro pagine</td><td class="nope">no</td></tr>
+          <tr><td>Manoscritti e bozze</td><td class="nope">no, mai</td></tr>
+          <tr><td>Revisioni sistematiche di EURYDIKE (protocollo, screening, decisioni)</td><td class="nope">no</td></tr>
+        </tbody>
+      </table></div>
+      <p class="foot">Quando metti il PDF di un articolo ricevuto nella tua inbox, ORPHEUS completa le sue pagine.</p>
+    </section>
+    <section class="band">
+      <h2>Dove stanno le cose</h2>
+<pre class="tree">C:\ORPHEUS\                <em>il programma</em>
+├─ cruscotto.cmd           <em>apre il cruscotto</em>
+├─ aggiorna.cmd
+├─ esporta_schede.cmd
+├─ importa_schede.cmd
+├─ registri\               <em>un file per comando</em>
+└─ locale\backups\         <em>copie di sicurezza</em>
+
+C:\ORPHEUS_DATI\           <em>i tuoi dati</em>
+├─ data\orpheus.db         <em>il database</em>
+├─ inbox\                  <em>PDF da leggere</em>
+│  └─ condivisione\        <em>file ricevuti</em>
+└─ condivisione\           <em>file creati da te</em></pre>
+    </section>
+  </div>
+
+  <section class="band">
+    <h2>Se qualcosa non va</h2>
+    <div class="help">
+      <div><b>Un comando dà errore</b><span>Il dettaglio è in <code>C:\ORPHEUS\registri</code>; l'installazione in <code>C:\ORPHEUS\installazione_log.txt</code>.</span></div>
+      <div><b>La ricerca per significato non parte</b><span>Installa <em>Microsoft Visual C++ Redistributable</em> (x64) dal sito Microsoft, poi riprova.</span></div>
+      <div><b>Le verifiche online non partono</b><span>Manca l'e-mail: aggiungi <code>ORPHEUS_CONTACT_EMAIL=…</code> in <code>C:\ORPHEUS\orpheus\.env</code>.</span></div>
+    </div>
+  </section>
+
+  <p class="foot">ORPHEUS · guida della versione __VERSION__ · aggiornata il __DATE__. Il codice è su <a href="https://github.com/SoftProjectsWork/orpheus-release">github.com/SoftProjectsWork/orpheus-release</a>.</p>
+</div>

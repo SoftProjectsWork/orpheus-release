@@ -1085,8 +1085,8 @@ function shareExportBlock(d) {
       const x = r.riepilogo;
       put(out, h("p", {class: "notice"}, "File pronto."),
         shareCounts([["Riviste", x.riviste], ["Schede delle riviste", x.schede_riviste], ["Articoli", x.articoli],
-          ["Schede degli articoli", x.schede_articoli], ["Pezzi di testo", x.pezzi_di_testo], ["Affermazioni", x.affermazioni],
-          ["Dimensione (MB)", r.dimensione_mb]]),
+          ["Schede degli articoli", x.schede_articoli], ["Valori delle schede uniche (EURYDIKE)", x.valori_scheda_unica],
+          ["Pezzi di testo", x.pezzi_di_testo], ["Affermazioni", x.affermazioni], ["Dimensione (MB)", r.dimensione_mb]]),
         h("p", null, h("b", null, r.nome), " ",
           h("a", {class: "btn small", href: `/api/condivisione/scarica?nome=${encodeURIComponent(r.nome)}`, download: r.nome}, "Scarica"), " ",
           h("button", {class: "btn small", type: "button", onclick: (e) => shareShow(r.nome, false, e.currentTarget.parentNode)}, "Mostra nella cartella")));
@@ -1157,6 +1157,7 @@ sections.condivisione = async () => {
   put(view, ...head("Condivisione", "Scambia con i colleghi le schede delle riviste e degli articoli, i metadati e i pezzi di testo. Niente PDF, niente manoscritti.",
     h("button", {class: "btn", type: "button", onclick: () => route()}, "Aggiorna")),
     h("div", {class: "cols"}, shareExportBlock(d), shareImportBlock(d)),
+    h("p", {class: "t-sub"}, "Vale per ORPHEUS ed EURYDIKE: le schede uniche degli articoli (Estrazione di EURYDIKE) viaggiano con le altre schede. Le revisioni sistematiche (protocollo, screening, decisioni) restano sul tuo PC."),
     h("p", {class: "src"}, `${t("Cartelle")}: ${d.cartella_creati} · ${d.cartella_ricevuti}`));
 };
 
@@ -1295,15 +1296,15 @@ for (const b of document.querySelectorAll("[data-lang-set]")) b.addEventListener
   applyLang(); buildNav(); route();
 });
 
-/* modules: ORPHEUS (green) and EURYDIKE (red); lavora and sistema are shared */
-const SHARED = ["lavora", "sistema"];
+/* modules: ORPHEUS (green) and EURYDIKE (red); lavora, condivisione and sistema are shared */
+const SHARED = ["lavora", "condivisione", "sistema"];
 const NAV = {
   orpheus: [["panoramica", "Panoramica"], ["articoli", "Articoli"], ["riviste", "Riviste"], ["manoscritti", "Manoscritti"],
     ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["lavora", "Lavora"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
   eurydike: [["eurydike/panoramica", "Panoramica"], ["eurydike/protocollo", "Protocollo"], ["eurydike/screening", "Screening"],
     ["eurydike/fulltext", "Full text"], ["eurydike/estrazione", "Estrazione (schede)"], ["eurydike/bias", "Rischio di bias"],
     ["eurydike/consenso", "Consenso"], ["eurydike/meta", "Meta-analisi"], ["eurydike/esporta", "Esporta"], null,
-    ["lavora", "Lavora"], ["sistema", "Sistema"]],
+    ["lavora", "Lavora"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
 };
 let moduleNow = "orpheus";
 let moduleShown = null;

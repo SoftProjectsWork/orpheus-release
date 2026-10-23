@@ -11,6 +11,7 @@ Questo repository contiene **solo il codice** distribuito ai colleghi: nessun da
 2. Estrai tutto, poi doppio clic su `installa.cmd` e segui le domande.
 3. Per gli aggiornamenti: doppio clic su `C:\ORPHEUS\aggiorna.cmd`.
 
-Le istruzioni complete sono in `tools/pacchetto/LEGGIMI.txt` (le trovi anche nello zip).
+Guida illustrata: `GUIDA_ORPHEUS.html` nello zip (anche in `tools/pacchetto/`). Istruzioni in breve:
+`tools/pacchetto/LEGGIMI.txt`.
 
-Versione: 0.54.1
+Versione: 0.54.2
