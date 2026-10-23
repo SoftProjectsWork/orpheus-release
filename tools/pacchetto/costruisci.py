@@ -34,7 +34,7 @@ ALSO = ("tzdata",)                              # time zones for zoneinfo on Win
 # What goes into the public code (also used by pubblica.py). Patterns relative to the repository root.
 PUBLIC_FILES = [
     "pyproject.toml",
-    "src/orpheus/**",
+    "src/orpheus/**/*",              # "**" alone matches only folders before Python 3.13
     "migrations/*.sql",
     "config/*.yaml",
     "templates/riviste_prioritarie.csv",
