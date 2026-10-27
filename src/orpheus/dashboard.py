@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import (__version__, audit, card_store, claims, config, content, db, engine, layout, lineage, policy_changes,
-               policy_versions, report, semantic, verify_doi)
+from . import (__version__, audit, card_store, claims, config, content, db, engine, journal_cards, layout, lineage,
+               policy_changes, policy_versions, report, semantic, verify_doi)
 from .localstate import LocalState
 
 RULES_VERSION = "dashboard-v1"
@@ -150,7 +150,7 @@ def overview(s: Settings, conn) -> dict:
             break
     others = engine.work_for_others(engine.Env(conn, s.home, s.project, s.local_root))
     for x in others["per_te"]:
-        alerts.append({"tipo": "per te", "testo": f"{x['lavoro']}: {x['quanti']}", "vai": "affermazioni"})
+        alerts.append({"tipo": "per te", "testo": f"{x['lavoro']}: {x['quanti']}", "vai": x.get("vai", "affermazioni")})
     with_claims = _one(conn, "SELECT count(DISTINCT article_id) FROM scientific_claim WHERE status = 'current' "
                              "AND language = 'en'")
     chain = [
@@ -864,15 +864,19 @@ def journal_list_rows(s: Settings, conn) -> dict:
     jl = JournalList.load(path)
     rows = jl.data_rows()
     by_sigla = policy_versions.journal_by_sigla(conn, rows)
+    gs = journal_cards.guideline_status(conn, s.home, s.project.storage.inbox_dir, rows)
+    guide = {g["sigla"]: g for g in gs["righe"]}
     out = []
     for r in rows:
         x = {k: r.get(k, "") for k in layout.CSV_COLUMNS}
         x["nel_database"] = r["sigla"].strip().lower() in by_sigla
         x["automatica"] = (r.get("note") or "").startswith("aggiunta automatica")
+        x["linee_guida"] = guide.get(r["sigla"])
         out.append(x)
     when = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") \
         if path.exists() else None
-    return {"righe": out, "colonne": list(layout.CSV_COLUMNS), **_src(s.project.storage.journals_csv, when)}
+    return {"righe": out, "colonne": list(layout.CSV_COLUMNS), "linee_guida": {k: gs[k] for k in ("conteggi", "sigle")},
+            "stati_linee_guida": journal_cards.GUIDELINE_STATES, **_src(s.project.storage.journals_csv, when)}
 
 
 def journal_check(s: Settings, conn, body: dict) -> dict:

@@ -14,4 +14,4 @@ Questo repository contiene **solo il codice** distribuito ai colleghi: nessun da
 Guida illustrata: `GUIDA_ORPHEUS.html` nello zip (anche in `tools/pacchetto/`). Istruzioni in breve:
 `tools/pacchetto/LEGGIMI.txt`.
 
-Versione: 0.55.0
+Versione: 0.55.1

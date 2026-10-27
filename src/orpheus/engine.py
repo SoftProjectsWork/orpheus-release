@@ -745,7 +745,11 @@ def work_for_others(env: Env) -> dict:
     sigla = {jid: sg.upper() for sg, jid in policy_versions.journal_by_sigla(conn, env.journal_list()).items()}
     refused = sum(waiting_files(f)[1] for f in (card_store.to_send_dir(env.home), journal_cards.to_send_dir(env.home),
                                                 claims.to_send_dir(env.home)))
+    gs = journal_cards.guideline_status(conn, env.home, env.project.storage.inbox_dir, env.journal_list())["sigle"]
     claude = [
+        {"lavoro": "schede delle riviste da scrivere (linee guida senza scheda)", "quanti": len(gs["senza_scheda"]),
+         "sigle": gs["senza_scheda"], "vai": "riviste",
+         "come": "Claude in sessione dai PDF delle linee guida; poi «Aggiorna le riviste» le invia"},
         {"lavoro": "schede degli articoli completi senza scheda", "quanti": len(complete) - len(with_card),
          "come": "pacchetti.cmd, poi Claude in sessione; le schede si inviano con lavora.cmd"},
         {"lavoro": "affermazioni in inglese (articoli con scheda senza affermazioni)",
@@ -757,7 +761,13 @@ def work_for_others(env: Env) -> dict:
     cp = claims.control_pending(conn, env.home)
     user = [{"lavoro": "affermazioni da controllare a mano (giusto S/N)", "quanti": cp["da_controllare"],
              "file": cp["file_da_compilare"],
-             "come": "compila il file, salvalo con _compilato alla fine del nome, poi lavora.cmd"}]
+             "come": "compila il file, salvalo con _compilato alla fine del nome, poi lavora.cmd", "vai": "affermazioni"},
+            {"lavoro": "riviste senza PDF delle linee guida", "quanti": len(gs["senza_linee_guida"]),
+             "sigle": gs["senza_linee_guida"], "vai": "riviste",
+             "come": "salva in PDF le istruzioni per gli autori (e, se ci sono, aims & scope e costi/APC) nella cartella "
+                     "inbox\\riviste\\<sigla>\\linee_guida, poi «Aggiungi e verifica gli articoli nuovi»"},
+            {"lavoro": "PDF delle linee guida da leggere", "quanti": len(gs["pdf_da_leggere"]),
+             "sigle": gs["pdf_da_leggere"], "vai": "riviste", "come": "«Aggiungi e verifica gli articoli nuovi» li legge"}]
     return {"per_claude": [x for x in claude if x["quanti"]], "per_te": [x for x in user if x["quanti"]]}
 
 

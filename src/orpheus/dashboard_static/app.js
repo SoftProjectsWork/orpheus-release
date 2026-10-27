@@ -747,16 +747,22 @@ async function journalListBlock() {
   const formBox = h("div");
   const msg = h("p", {role: "status", class: "muted"});
   const auto = d.righe.filter((r) => r.automatica);
-  let filter = "";
+  let filter = "", gFilter = "";
   const listBox = h("div");
+  const GTAG = {scheda: "good", scheda_da_inviare: "acc", senza_scheda: "acc", scheda_da_rifare: "warn",
+    pdf_da_leggere: "warn", senza_linee_guida: "warn"};
+  const guideCell = (g) => !g ? null : h("span", {class: "gl"}, tag(g.etichetta, GTAG[g.stato]),
+    g.stato === "senza_linee_guida" || g.stato === "pdf_da_leggere" ? h("div", {class: "t-sub", title: t("Cartella")}, g.cartella) : null);
   const renderList = () => {
     const q = filter.trim().toLowerCase();
-    const rows = d.righe.filter((r) => !q || `${r.sigla} ${r.titolo} ${r.issn_print} ${r.issn_online}`.toLowerCase().includes(q));
+    const rows = d.righe.filter((r) => (!q || `${r.sigla} ${r.titolo} ${r.issn_print} ${r.issn_online}`.toLowerCase().includes(q))
+      && (!gFilter || (r.linee_guida && r.linee_guida.stato === gFilter)));
     put(listBox, rows.length ? h("div", {class: "table-wrap"}, h("table", null,
-      h("thead", null, h("tr", null, ["Sigla", "Titolo", "ISSN", "Stato", ""].map((x) => h("th", {scope: "col"}, x)))),
+      h("thead", null, h("tr", null, ["Sigla", "Titolo", "ISSN", "Linee guida e scheda", "Stato", ""].map((x) => h("th", {scope: "col"}, x)))),
       h("tbody", null, rows.map((r) => h("tr", null,
         h("td", null, h("b", null, r.sigla)), h("td", null, r.titolo),
         h("td", null, [r.issn_print, r.issn_online].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(" · ") || "—"),
+        h("td", null, guideCell(r.linee_guida)),
         h("td", null, r.automatica ? tag("aggiunta automatica", "warn") : null, " ", r.nel_database ? null : tag("non ancora nel database")),
         h("td", null, h("button", {type: "button", class: "btn small", onclick: () => openForm(r)}, "Modifica")))))))
       : h("p", {class: "empty"}, "Nessuna rivista con questo filtro."));
@@ -824,13 +830,40 @@ async function journalListBlock() {
     setTimeout(() => f[row ? "titolo" : "sigla"].focus(), 0);
     if (row) check();
   };
+  const gl = d.linee_guida;
+  /* T-055: reminders — journals without guideline PDFs (for the user) and guidelines without a card (for Claude) */
+  const guideNotes = () => {
+    if (!gl) return null;
+    const out = h("div");
+    const list = (k) => gl.sigle[k].join(", ");
+    if (gl.conteggi.senza_linee_guida) out.append(h("p", {class: "notice"},
+      h("b", null, `${t("Per te")}: ${t("riviste senza PDF delle linee guida")} (${fmtN(gl.conteggi.senza_linee_guida)}). `),
+      `${list("senza_linee_guida")}. `,
+      t("Salva in PDF le istruzioni per gli autori (e, se ci sono, aims & scope e costi/APC) nella cartella inbox\\riviste\\<sigla>\\linee_guida di ogni rivista, poi «Aggiungi e verifica gli articoli nuovi».")));
+    if (gl.conteggi.pdf_da_leggere) out.append(h("p", {class: "notice"},
+      h("b", null, `${t("PDF delle linee guida da leggere")} (${fmtN(gl.conteggi.pdf_da_leggere)}). `),
+      `${list("pdf_da_leggere")}. `, t("«Aggiungi e verifica gli articoli nuovi» li legge.")));
+    if (gl.conteggi.senza_scheda) out.append(h("p", {class: "muted"},
+      h("b", null, `${t("Per Claude")}: ${t("linee guida senza scheda")} (${fmtN(gl.conteggi.senza_scheda)}). `),
+      `${list("senza_scheda")}. `, t("Le schede le scrive Claude in sessione dai PDF; poi «Aggiorna le riviste» le invia.")));
+    if (gl.conteggi.scheda_da_inviare) out.append(h("p", {class: "notice"},
+      h("b", null, `${t("schede pronte da inviare")} (${fmtN(gl.conteggi.scheda_da_inviare)}). `),
+      `${list("scheda_da_inviare")}. `, t("Premi «Aggiorna le riviste».")));
+    return out.children.length ? out : null;
+  };
   put(box, h("div", {class: "block-head"}, h("h2", {id: "h-jlist"}, "Elenco delle riviste"),
       h("button", {type: "button", class: "btn primary", onclick: () => openForm(null)}, "Nuova rivista")),
     auto.length ? h("p", {class: "notice"}, `${t("Riviste aggiunte in automatico dai PDF")}: ${auto.map((r) => r.sigla).join(", ")}. `
       + t("La sigla è proposta dalle iniziali del titolo: cambiala con \"Modifica\" se vuoi.")) : null,
+    guideNotes(),
     formBox, msg,
-    d.righe.length > 8 ? h("label", {class: "field"}, "Cerca una rivista", h("input", {type: "search", placeholder: "sigla, nome o ISSN",
-      oninput: debounce((e) => { filter = e.target.value; renderList(); }, 150)})) : null,
+    h("div", {class: "filters"},
+      d.righe.length > 8 ? h("label", {class: "field"}, "Cerca una rivista", h("input", {type: "search", placeholder: "sigla, nome o ISSN",
+        oninput: debounce((e) => { filter = e.target.value; renderList(); }, 150)})) : null,
+      gl ? h("label", {class: "field"}, "Linee guida e scheda", h("select", {onchange: (e) => { gFilter = e.target.value; renderList(); }},
+        h("option", {value: ""}, "Tutte"),
+        Object.entries(d.stati_linee_guida).filter(([k]) => gl.conteggi[k]).map(([k, label]) =>
+          h("option", {value: k}, `${t(label)} (${fmtN(gl.conteggi[k])})`)))) : null),
     listBox, srcLine(d, t("Le scritture fanno prima una copia di sicurezza del database se l'ultima è vecchia.")));
   renderList();
   return box;
@@ -1114,11 +1147,13 @@ sections.lavora = async () => {
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Lavori che lavora non fa")),
       h("h3", null, "Per te"),
       d.lavori.per_te.length ? h("ul", {class: "notes"}, d.lavori.per_te.map((x) => h("li", null, h("div", null,
-        h("b", null, `${x.lavoro}: ${fmtN(x.quanti)}`), x.file ? h("div", {class: "t-sub"}, x.file) : null, h("div", {class: "t-sub"}, x.come)))))
+        h("b", null, `${x.lavoro}: ${fmtN(x.quanti)}`), x.sigle ? h("div", {class: "t-sub"}, x.sigle.join(", ")) : null,
+        x.file ? h("div", {class: "t-sub"}, x.file) : null, h("div", {class: "t-sub"}, x.come)))))
         : h("p", {class: "empty"}, "Niente: i controlli a mano sono fatti."),
       h("h3", null, "Per Claude, in una sessione"),
       d.lavori.per_claude.length ? h("ul", {class: "notes"}, d.lavori.per_claude.map((x) => h("li", null, h("div", null,
-        h("b", null, `${x.lavoro}: ${fmtN(x.quanti)}`), h("div", {class: "t-sub"}, x.come))))) : h("p", {class: "empty"}, "Niente."),
+        h("b", null, `${x.lavoro}: ${fmtN(x.quanti)}`), x.sigle ? h("div", {class: "t-sub"}, x.sigle.join(", ")) : null,
+        h("div", {class: "t-sub"}, x.come))))) : h("p", {class: "empty"}, "Niente."),
       srcLine(d))));
 
   const runs = d.esecuzioni;

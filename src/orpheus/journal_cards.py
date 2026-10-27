@@ -453,6 +453,71 @@ def submit_folder(conn: sqlite3.Connection, home: Path) -> list[dict]:
     return out
 
 
+GUIDELINE_STATES = {
+    "scheda": "con scheda",
+    "scheda_da_rifare": "scheda da rifare (linee guida cambiate)",
+    "scheda_da_inviare": "scheda pronta da inviare",
+    "senza_scheda": "linee guida senza scheda",
+    "pdf_da_leggere": "PDF delle linee guida da leggere",
+    "senza_linee_guida": "senza linee guida",
+}
+
+
+def _waiting_siglas(home: Path) -> set[str]:
+    """Siglas (lower case) of the cards waiting in da_inviare that have not been refused since their last change."""
+    out = set()
+    folder = to_send_dir(home)
+    for f in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        why = f.with_suffix(".motivi.txt")
+        if why.exists() and why.stat().st_mtime >= f.stat().st_mtime:
+            continue
+        try:
+            sg = json.loads(f.read_text(encoding="utf-8")).get("sigla")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(sg, str) and sg.strip():
+            out.add(sg.strip().lower())
+    return out
+
+
+def guideline_status(conn: sqlite3.Connection, home: Path, inbox_dir: str, journal_list: list[dict]) -> dict:
+    """T-055: for every journal of the list, where its author guidelines and its card are (no network, no writes).
+    {"righe": [{sigla, stato, etichetta, pdf, cartella}], "conteggi": {stato: n}, "sigle": {stato: [sigla…]}}"""
+    from . import layout
+    by_sigla = policy_versions.journal_by_sigla(conn, journal_list)
+    waiting = _waiting_siglas(home)
+    cards_now = {r["journal_id"]: r["policy_version_id"] for r in conn.execute(
+        "SELECT journal_id, policy_version_id FROM journal_card WHERE status = 'current' AND card_version = ?",
+        (CARD_VERSION,))}
+    rows = []
+    for j in journal_list:
+        sg = (j.get("sigla") or "").strip()
+        if not sg or not layout.SIGLA_RE.match(sg):
+            continue
+        rel = Path(inbox_dir) / layout.JOURNALS_DIR / sg / layout.GUIDELINES_DIR
+        folder = home / rel
+        n_pdf = sum(1 for p in folder.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf") if folder.is_dir() else 0
+        jid = by_sigla.get(sg.lower())
+        last = latest_version(conn, jid) if jid else None
+        if jid in cards_now and last is not None and cards_now[jid] == last["id"]:
+            state = "scheda"
+        elif sg.lower() in waiting:
+            state = "scheda_da_inviare"
+        elif jid in cards_now:
+            state = "scheda_da_rifare"
+        elif last is not None:
+            state = "senza_scheda"
+        elif n_pdf:
+            state = "pdf_da_leggere"
+        else:
+            state = "senza_linee_guida"
+        rows.append({"sigla": sg, "stato": state, "etichetta": GUIDELINE_STATES[state], "pdf": n_pdf,
+                     "cartella": str(rel).replace("/", "\\")})
+    counts = {k: sum(1 for r in rows if r["stato"] == k) for k in GUIDELINE_STATES}
+    siglas = {k: [r["sigla"] for r in rows if r["stato"] == k] for k in GUIDELINE_STATES}
+    return {"righe": rows, "conteggi": counts, "sigle": siglas}
+
+
 def status(conn: sqlite3.Connection) -> dict:
     q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
     stale = conn.execute("""SELECT count(*) FROM journal_card c WHERE c.status = 'current' AND c.policy_version_id <>
