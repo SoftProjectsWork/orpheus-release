@@ -851,6 +851,85 @@ def _protected_write(s: Settings, conn, fn):
     return out
 
 
+# ---------------------------------------------------------------- T-054: journal list and "Da assegnare"
+
+def _locator(s: Settings):
+    return layout.PdfLocator(s.home, s.project.storage.inbox_dir, s.local_root)
+
+
+def journal_list_rows(s: Settings, conn) -> dict:
+    """The rows of riviste_prioritarie.csv for the window "Nuova rivista" / "Modifica" (read-only)."""
+    from .journal_list_write import JournalList
+    path = s.home / s.project.storage.journals_csv
+    jl = JournalList.load(path)
+    rows = jl.data_rows()
+    by_sigla = policy_versions.journal_by_sigla(conn, rows)
+    out = []
+    for r in rows:
+        x = {k: r.get(k, "") for k in layout.CSV_COLUMNS}
+        x["nel_database"] = r["sigla"].strip().lower() in by_sigla
+        x["automatica"] = (r.get("note") or "").startswith("aggiunta automatica")
+        out.append(x)
+    when = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") \
+        if path.exists() else None
+    return {"righe": out, "colonne": list(layout.CSV_COLUMNS), **_src(s.project.storage.journals_csv, when)}
+
+
+def journal_check(s: Settings, conn, body: dict) -> dict:
+    """The checks of the window, field by field, without writing."""
+    from .journal_list_write import JournalList
+    jl = JournalList.load(s.home / s.project.storage.journals_csv)
+    values = {k: str((body.get("valori") or {}).get(k) or "").strip() for k in layout.CSV_COLUMNS}
+    original = body.get("sigla_originale") or None
+    editing = jl.find(original) if original else None
+    return {"problemi": jl.check(values, conn=conn, editing=editing)}
+
+
+def journal_save(s: Settings, conn, body: dict) -> dict:
+    from . import journal_folders as jf
+    values = body.get("valori") or {}
+    if not isinstance(values, dict):
+        raise ValueError("valori non leggibili")
+    return _protected_write(s, conn, lambda: jf.save_journal(
+        conn, s.home, s.project.storage.inbox_dir, s.home / s.project.storage.journals_csv, values,
+        body.get("sigla_originale") or None, _locator(s), archive_dir=getattr(s.project.storage, "archive_dir", "data/archive")))
+
+
+def journal_lookup(s: Settings, body: dict, *, clients=None) -> dict:
+    """"Compila dall'ISSN": Crossref + OpenAlex (network), nothing written."""
+    from . import journal_folders as jf
+    from . import crossref as cr
+    from . import journal_metrics
+    if clients is None:
+        secrets = config.load_secrets()
+        if not cr.valid_email(secrets.contact_email):
+            raise ValueError("manca l'indirizzo e-mail in ORPHEUS_CONTACT_EMAIL (file .env): serve per Crossref e OpenAlex")
+        key = secrets.openalex_api_key.get_secret_value() if secrets.openalex_api_key else None
+        clients = (cr.CrossrefClient(secrets.contact_email, max_retries=1),
+                   journal_metrics.OpenAlexSources(secrets.contact_email, api_key=key, max_retries=1))
+    return jf.lookup_issn(str(body.get("issn") or ""), crossref_client=clients[0], openalex_client=clients[1])
+
+
+def unassigned(s: Settings, conn) -> dict:
+    from . import journal_folders as jf
+    loc = _locator(s)
+    out = jf.unassigned(conn, s.home, s.project.storage.inbox_dir, s.journal_list(), loc)
+    loc.save()
+    return {**out, **_src("document, doi_check, journal_issn; cartella inbox/articoli_vari", utc_now())}
+
+
+def assign_journal(s: Settings, conn, body: dict) -> dict:
+    from . import journal_folders as jf
+    doc, sigla = str(body.get("document_id") or ""), str(body.get("sigla") or "")
+    if not doc or not sigla:
+        raise ValueError("scegli la rivista")
+    loc = _locator(s)
+    out = _protected_write(s, conn, lambda: jf.assign(conn, s.home, s.project.storage.inbox_dir, s.journal_list(), loc,
+                                                       doc, sigla))
+    loc.save()
+    return out
+
+
 def eurydike_new_review(s: Settings, conn, body: dict) -> dict:
     from .eurydike import protocol
     return _protected_write(s, conn, lambda: protocol.new_review(conn, s.home, body))
@@ -951,7 +1030,7 @@ def eurydike_write(s: Settings, conn, aid: str, body: dict) -> dict:
 # ---------------------------------------------------------------- web app
 
 def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | None = None, allowed_hosts=None,
-               opener=None):
+               opener=None, lookup_clients=None):
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -1117,6 +1196,46 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
             if conn is not None:
                 conn.close()
 
+    async def journal_post(request: Request, fn, *, needs_db: bool = True):
+        """POST of the journal list / assignments: token, copy check and backup (_protected_write), clear messages."""
+        from .journal_list_write import ListError
+        if request.headers.get("x-orpheus-token") != token:
+            return JSONResponse({"errore": "token mancante o sbagliato"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:                                                # noqa: BLE001
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"errore": "richiesta non leggibile"}, status_code=400)
+        conn = None
+        try:
+            if needs_db:
+                conn = s.connect()
+            return JSONResponse(fn(conn, body))
+        except FileNotFoundError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=503)
+        except ListError as exc:
+            return JSONResponse({"errore": exc.message, "problemi": exc.problems}, status_code=422)
+        except (ValueError, rv_error()) as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=422)
+        except sqlite3.DatabaseError as exc:
+            return JSONResponse({"errore": f"il database ha rifiutato la modifica: {exc}"}, status_code=422)
+        finally:
+            if conn is not None:
+                conn.close()
+
+    async def assign_endpoint(request: Request):
+        return await journal_post(request, lambda c, b: assign_journal(s, c, b))
+
+    async def journal_check_endpoint(request: Request):
+        return await journal_post(request, lambda c, b: journal_check(s, c, b))
+
+    async def journal_save_endpoint(request: Request):
+        return await journal_post(request, lambda c, b: journal_save(s, c, b))
+
+    async def journal_lookup_endpoint(request: Request):
+        return await journal_post(request, lambda c, b: journal_lookup(s, b, clients=lookup_clients), needs_db=False)
+
     def rv_error():
         from .eurydike import review as rv
         return rv.ReviewError
@@ -1248,6 +1367,12 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
                                                      "fonte": s.project.storage.journals_csv})),
         Route("/api/panoramica", with_db(lambda r, c: overview(s, c))),
         Route("/api/articoli", with_db(lambda r, c: articles(s, c))),
+        Route("/api/articoli/da-assegnare", with_db(lambda r, c: unassigned(s, c))),
+        Route("/api/articoli/assegna", assign_endpoint, methods=["POST"]),
+        Route("/api/riviste/elenco", with_db(lambda r, c: journal_list_rows(s, c))),
+        Route("/api/riviste/controlla", journal_check_endpoint, methods=["POST"]),
+        Route("/api/riviste/salva", journal_save_endpoint, methods=["POST"]),
+        Route("/api/riviste/compila", journal_lookup_endpoint, methods=["POST"]),
         Route("/api/articoli/{aid}", with_db(detail)),
         Route("/api/affermazioni", with_db(lambda r, c: claims_list(s, c))),
         Route("/api/riviste", with_db(lambda r, c: journals(s, c))),

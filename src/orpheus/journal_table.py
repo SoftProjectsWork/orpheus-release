@@ -43,13 +43,25 @@ RULES_VERSION = "journals-v2"
 _TYPES = {"print": "print", "electronic": "electronic"}
 
 
+TRACKING_PREFIXES = ("utm_", "gad_", "hsa_")
+TRACKING_KEYS = ("fbclid", "gclid", "gbraid", "wbraid", "srsltid", "msclkid", "dclid")
+
+
+def is_tracking(key: str) -> bool:
+    k = key.lower()
+    return k.startswith(TRACKING_PREFIXES) or k in TRACKING_KEYS
+
+
 def clean_url(url: str | None) -> str | None:
-    """The URL without tracking parameters (utm_*, fbclid, gclid)."""
+    """The URL without tracking parameters (utm_*, gad_*, hsa_*, fbclid, gclid, gbraid, wbraid, srsltid, msclkid;
+    T-054). A URL without them is returned exactly as it is."""
     if not url or not url.strip():
         return None
     parts = urlsplit(url.strip())
-    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-             if not k.lower().startswith("utm_") and k.lower() not in ("fbclid", "gclid")]
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    if not any(is_tracking(k) for k, _v in pairs):
+        return url.strip()
+    query = [(k, v) for k, v in pairs if not is_tracking(k)]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
@@ -185,7 +197,7 @@ def plan(conn: sqlite3.Connection, home: Path, journal_list: list[dict], *, year
                      "da_collegare": sorted(a for a in (g["articles"] if g else []) if a not in linked),
                      "_group": g})
     outside = [g for g in groups if id(g) not in matched_groups]
-    return {"regole": RULES_VERSION, "riviste": rows,
+    return {"regole": RULES_VERSION, "riviste": rows, "_fuori": outside,
             "articoli_da_collegare": sum(len(r.get("da_collegare", [])) for r in rows if r["azione"] != "non scritta"),
             "articoli_senza_rivista_in_elenco": sum(len(g["articles"]) for g in outside)}
 

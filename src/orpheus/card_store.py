@@ -32,7 +32,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from . import audit, cards
+from . import audit, cards, layout
 from .benchmark import excel_plain, excel_text, pick, read_filled
 from .config import ROOT
 from .europepmc_survey import is_cc
@@ -698,16 +698,21 @@ CONTROL_COLUMNS = ["n", "id_scheda", "ord", "articolo", "doi", "file", "cartella
 _CONTROL_ORIGINAL = re.compile(rf"^{CONTROL_PREFIX}_(\d+)_\d{{4}}-\d{{2}}-\d{{2}}(_\d{{6}})?$")
 
 
-def control_rows(conn: sqlite3.Connection, size: int = CONTROL_SIZE, seed: str = CONTROL_SEED) -> tuple[list[dict], int]:
+def control_rows(conn: sqlite3.Connection, size: int = CONTROL_SIZE, seed: str = CONTROL_SEED,
+                 locator=None) -> tuple[list[dict], int]:
     current = {r["article_id"]: r for r in conn.execute("SELECT * FROM article_card WHERE status = 'current'")}
     chosen = pick(list(current), size, seed)
     rows: list[dict] = []
     for aid in chosen:
         c = current[aid]
         art = conn.execute("SELECT title, doi FROM article WHERE id = ?", (aid,)).fetchone()
-        doc = conn.execute("SELECT original_path FROM document WHERE id = ?", (c["document_id"],)).fetchone() \
+        doc = conn.execute("SELECT original_path, file_sha256 FROM document WHERE id = ?", (c["document_id"],)).fetchone() \
             if c["document_id"] else None
         where = PurePosixPath(doc["original_path"].replace("\\", "/")) if doc else None
+        if doc and locator is not None:              # T-054: where the PDF is now
+            now = locator.find(doc["original_path"], doc["file_sha256"])
+            if now is not None:
+                where = PurePosixPath(layout.shown_path(locator.home, now))
         for v in conn.execute("SELECT * FROM card_value WHERE card_id = ? ORDER BY ord", (c["id"],)):
             todo = ("l'articolo davvero non lo riporta" if v["origin"] == "not_available"
                     else "il valore è quello dell'articolo per questo campo (e il gruppo è giusto)")

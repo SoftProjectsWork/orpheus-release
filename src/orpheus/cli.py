@@ -26,6 +26,16 @@ Data
                        saved Crossref answers (title, publisher, ISSN types), and links the confirmed articles and
                        their PDFs to their journal (Q9, rules journals-v2: an ISSN type 'unknown' is completed when
                        the corrected list gives it); --prova: write nothing
+  sistema-riviste      T-054: siglas that are not valid folder names renamed in riviste_prioritarie.csv and in the
+                       folders (A&R → AR), a folder without a row whose articles are all of ONE journal merged into
+                       that journal's folder (PIIS → JP), tracking parameters removed from the URLs, missing folders
+                       created; copy of the list in data/archive, registro in rapporti/spostamenti; --prova
+  riconosci-riviste    T-054: a journal of confirmed articles (Crossref) that is not in the list becomes a new row
+                       (sigla from the initials, title, publisher, ISSNs; site from OpenAlex), then scrivi-riviste and
+                       its folders; --prova, --senza-openalex
+  sposta-articoli      T-054: the PDFs of articoli_vari whose article has a journal go to riviste/<sigla>/articoli
+                       (same file already there → inbox/doppioni; another file with that name → _2); registro in
+                       rapporti/spostamenti; the others are listed "da assegnare"; --prova; --annulla REGISTRO|ultimo
   metriche-riviste     official metrics of the journals (T-028, rules metrics-v1) into journal_metric: SJR, quartiles,
                        h-index and citations per document from the SCImago file in inbox/metriche (scimagojr <anno>.csv,
                        downloaded by the user) and 2-year mean citedness, h-index and id from OpenAlex (/sources/issn:,
@@ -312,6 +322,11 @@ def _finish(ctx: Ctx, *, wrote: bool) -> dict:
     if ctx.report.status in ("first_time", "no_identity"):
         out["nota"] = ctx.report.message
     return out
+
+
+def _locator(ctx: Ctx) -> layout.PdfLocator:
+    """T-054: finds the PDFs where they are now (moved files), fingerprints kept in this PC's local folder."""
+    return layout.PdfLocator(ctx.home, ctx.project.storage.inbox_dir, ctx.state.root)
 
 
 # ---------------------------------------------------------------- data commands
@@ -635,6 +650,119 @@ def cmd_write_journals(args) -> int:
                            "articoli": q("SELECT count(*) FROM article")}
     _print({**out, **_finish(ctx, wrote=not args.prova)})
     return 0
+
+
+def _journal_list(ctx: Ctx):
+    from .journal_list_write import JournalList, ListLocked
+    try:
+        return JournalList.load(ctx.home / ctx.project.storage.journals_csv)
+    except ListLocked as exc:
+        raise CliError(exc.message, code=4)
+
+
+def _list_guard(fn):
+    """Errors of the journal list (file open in Excel, wrong values) as a clear message, nothing written."""
+    from .journal_list_write import ListError, ListLocked
+    try:
+        return fn()
+    except ListLocked as exc:
+        raise CliError(exc.message, code=4)
+    except ListError as exc:
+        raise CliError(exc.message, problemi=exc.problems)
+
+
+def cmd_fix_journals(args) -> int:
+    """sistema-riviste (T-054 passo 3): valid siglas, folders merged/renamed, URLs without tracking parameters."""
+    from . import journal_folders as jf
+    ctx = _open(write=not args.prova)
+    storage = ctx.project.storage
+    jl = _journal_list(ctx)
+    loc = _locator(ctx)
+    the_plan = jf.plan_fix(ctx.conn, ctx.home, storage.inbox_dir, jl, loc)
+    out = {"modo": "prova" if args.prova else "scrittura", "regole": jf.RULES_VERSION,
+           **{k: the_plan[k] for k in ("sigle", "cartelle", "url", "cartelle_da_creare", "cartelle_senza_riga")}}
+    wrote = False
+    if not args.prova and the_plan["da_fare"]:
+        out["fatto"] = _list_guard(lambda: jf.apply_fix(ctx.conn, ctx.home, storage.inbox_dir, jl, loc, the_plan,
+                                                         archive_dir=storage.archive_dir))
+        wrote = True
+    elif not the_plan["da_fare"]:
+        out["messaggio"] = "Niente da sistemare."
+    loc.save()
+    _print({**out, **_finish(ctx, wrote=wrote)})
+    return 0 if not (out.get("fatto") or {}).get("problemi") else 3
+
+
+def cmd_recognise_journals(args) -> int:
+    """riconosci-riviste (T-054 passo 4a-b): new rows of the list for journals of confirmed articles not in the list."""
+    from . import journal_folders as jf
+    client, note = None, None
+    if not args.prova and not args.senza_openalex:
+        oa = {x.id: x for x in load_sources()}.get(journal_metrics.OPENALEX_SOURCE)
+        secrets = load_secrets()
+        if oa is not None and oa.enabled and oa.cost == "free" and crossref.valid_email(secrets.contact_email):
+            key = secrets.openalex_api_key.get_secret_value() if secrets.openalex_api_key else None
+            client = journal_metrics.OpenAlexSources(secrets.contact_email, api_key=key)
+        else:
+            note = "OpenAlex non usato (fonte non abilitata o e-mail mancante): il sito si aggiunge a mano"
+    ctx = _open(write=not args.prova)
+    storage = ctx.project.storage
+    jl = _journal_list(ctx)
+    the_plan = jf.plan_recognise(ctx.conn, ctx.home, jl, inbox_dir=storage.inbox_dir, openalex=client)
+    out = {"modo": "prova" if args.prova else "scrittura", "regole": jf.RULES_VERSION,
+           "riviste_nuove": [{k: n[k] for k in ("sigla", "titolo", "editore", "issn", "articoli", "doi")}
+                             | ({"nota_sito": n["nota_sito"]} if n.get("nota_sito") else {})
+                             | {"sito": n["valori"]["sito_ufficiale"]} for n in the_plan["nuove"]],
+           "non_create": the_plan["non_create"]}
+    if note:
+        out["nota"] = note
+    wrote = False
+    if not args.prova and the_plan["nuove"]:
+        out["fatto"] = _list_guard(lambda: jf.apply_recognise(ctx.conn, ctx.home, storage.inbox_dir, jl, the_plan,
+                                                               archive_dir=storage.archive_dir))
+        out["messaggio"] = ("Riviste nuove aggiunte all'elenco con una sigla proposta: puoi cambiarla nel cruscotto "
+                            "(Riviste → Modifica).")
+        wrote = True
+    elif not the_plan["nuove"]:
+        out["messaggio"] = "Nessuna rivista nuova."
+    _print({**out, **_finish(ctx, wrote=wrote)})
+    return 0
+
+
+def cmd_move_articles(args) -> int:
+    """sposta-articoli (T-054 passo 4c): PDFs of articoli_vari with a journal → riviste/<sigla>/articoli; --annulla."""
+    from . import journal_folders as jf
+    ctx = _open(write=not args.prova)
+    storage = ctx.project.storage
+    loc = _locator(ctx)
+    if args.annulla:
+        reg = jf.latest_registro(ctx.home) if args.annulla == "ultimo" else Path(args.annulla)
+        if reg is not None and not reg.is_absolute() and not reg.exists():
+            reg = ctx.home / jf.MOVES_DIR / reg
+        if reg is None or not reg.is_file():
+            raise CliError(f"Registro non trovato: {args.annulla} (i registri sono in {ctx.home / jf.MOVES_DIR})")
+        out = {"annulla": str(reg), **jf.undo(ctx.conn, ctx.home, reg, loc, trial=args.prova)}
+        loc.save()
+        _print({**out, **_finish(ctx, wrote=not args.prova)})
+        return 0 if not out["problemi"] else 3
+    rows, problems = layout.read_journal_list(ctx.home / storage.journals_csv)
+    if args.prova:
+        p = jf.plan_moves(ctx.conn, ctx.home, storage.inbox_dir, rows, loc)
+        out = {"modo": "prova", "da_spostare": p["da_spostare"], "da_assegnare": p["da_assegnare"],
+               "altri": p["altri"], "non_ancora_letti": p["non_ancora_letti"]}
+    else:
+        r = jf.apply_moves(ctx.conn, ctx.home, storage.inbox_dir, rows, loc)
+        out = {"modo": "scrittura", **r,
+               "riepilogo": {"spostati": len(r["spostati"]), "da_assegnare": len(r["da_assegnare"]),
+                             "problemi": len(r["problemi"])}}
+        if r["da_assegnare"]:
+            out["messaggio"] = ("Alcuni PDF restano in articoli_vari: scegli la rivista nel cruscotto "
+                                "(Articoli → Da assegnare).")
+    if problems:
+        out["problemi_elenco_riviste"] = problems
+    loc.save()
+    _print({**out, **_finish(ctx, wrote=not args.prova and bool(out.get("spostati")))})
+    return 0 if not out.get("problemi") else 3
 
 
 def cmd_journal_metrics(args) -> int:
@@ -1214,7 +1342,7 @@ def cmd_policy_versions(args) -> int:
     rows, problems = layout.read_journal_list(ctx.home / ctx.project.storage.journals_csv)
     if not rows:
         raise CliError("Elenco delle riviste vuoto o illeggibile: " + "; ".join(problems or ["nessuna riga"]))
-    the_plan = policy_versions.plan(ctx.conn, rows, home=ctx.home)
+    the_plan = policy_versions.plan(ctx.conn, rows, home=ctx.home, locator=_locator(ctx))
     out = {"modo": "prova" if args.prova else "scrittura", "regole": policy_versions.RULES_VERSION,
            "linee_guida": policy_versions.public(the_plan), "versioni": policy_versions.public_versions(the_plan),
            "da_scrivere": the_plan["da_scrivere"]}
@@ -1381,7 +1509,7 @@ def cmd_align_access(_args) -> int:
 
 def cmd_separate(_args) -> int:
     ctx = _open(write=False)
-    res = content.separate(ctx.conn, ctx.home, ctx.project.storage.inbox_dir)
+    res = content.separate(ctx.conn, ctx.home, ctx.project.storage.inbox_dir, locator=_locator(ctx))
     classes = content.classify_all(ctx.conn)
     counts = {k.replace(" ", "_"): sum(1 for c in classes.values() if c["classe"] == k) for k in content.CLASSES}
     out = {"spostati": len(res["spostati"]), "cartella": str(ctx.home / content.SEPARATED_DIR),
@@ -1392,7 +1520,7 @@ def cmd_separate(_args) -> int:
 
 def cmd_benchmark_csv(args) -> int:
     ctx = _open(write=False)
-    sample = benchmark.build(ctx.conn, size=args.righe)
+    sample = benchmark.build(ctx.conn, size=args.righe, locator=_locator(ctx))
     path, written = benchmark.write(sample, ctx.home)
     out = {"file_csv": str(path), "nuovo_file": written, "righe": len(sample.rows),
            "campione": {k.replace(" ", "_"): v for k, v in sample.chosen.items()},
@@ -1710,7 +1838,7 @@ def cmd_local_cards(args) -> int:
 
 def cmd_cards_csv(_args) -> int:
     ctx = _open(write=False)
-    rows, n_cards = card_store.control_rows(ctx.conn)
+    rows, n_cards = card_store.control_rows(ctx.conn, locator=_locator(ctx))
     if not rows:
         raise CliError("Nessuna scheda accettata nel database: prima invia le schede con schede.cmd.")
     path, written = card_store.write_control_csv(rows, n_cards, ctx.home)
@@ -2022,6 +2150,17 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("scrivi-riviste")
     p.add_argument("--prova", action="store_true", help="show what would be written, write nothing")
     p.set_defaults(func=cmd_write_journals)
+    p = sub.add_parser("sistema-riviste")
+    p.add_argument("--prova", action="store_true", help="show what would be changed, change nothing")
+    p.set_defaults(func=cmd_fix_journals)
+    p = sub.add_parser("riconosci-riviste")
+    p.add_argument("--prova", action="store_true", help="no network, write nothing: the journals that would be added")
+    p.add_argument("--senza-openalex", action="store_true", help="do not ask OpenAlex for the site of the journal")
+    p.set_defaults(func=cmd_recognise_journals)
+    p = sub.add_parser("sposta-articoli")
+    p.add_argument("--prova", action="store_true", help="show what would be moved, move nothing")
+    p.add_argument("--annulla", default=None, help="registro (rapporti/spostamenti/*.json) to reverse, or 'ultimo'")
+    p.set_defaults(func=cmd_move_articles)
     p = sub.add_parser("metriche-riviste")
     p.add_argument("--prova", action="store_true", help="no network, write nothing: what would be read and asked")
     p.add_argument("--senza-openalex", action="store_true", help="only the SCImago file, no network")

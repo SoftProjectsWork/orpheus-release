@@ -64,10 +64,11 @@
 #              messaggi, legge la risposta, copia la correzione); non modifica il database
 #   invia_schede_chat  copia di sicurezza, poi le schede accettate della chat nel database (orpheus chat-schede --invia,
 #              stessi controlli di submit, esecutore chat_manuale); nel registro solo i conteggi
-#   aggiorna_articoli    gruppo di lavora (engine-v1): PDF nuovi, DOI, riviste, PubMed, Europe PMC, bibliografie,
+#   aggiorna_articoli    gruppo di lavora (engine-v1): PDF nuovi, DOI, riviste riconosciute dai PDF e articoli
+#              spostati nelle cartelle delle riviste (T-054), riviste, PubMed, Europe PMC, bibliografie,
 #              autori, pezzi di testo e vettori, report - solo quello che manca, copia di sicurezza prima
-#   aggiorna_riviste     gruppo di lavora: elenco delle riviste e linee guida, schede delle riviste scritte da Claude,
-#              metriche (SCImago e OpenAlex), report
+#   aggiorna_riviste     gruppo di lavora: sigle e cartelle delle riviste (T-054), elenco delle riviste e linee guida,
+#              schede delle riviste scritte da Claude, metriche (SCImago e OpenAlex), report
 #   invia_lavoro_claude  gruppo di lavora: schede degli articoli e affermazioni scritte da Claude, pezzi e vettori, report
 #   manutenzione   controllo generale, prova di ripristino dell'ultima copia, salute di ORPHEUS, report (solo lettura)
 #   prepara_manoscritto  per UN manoscritto e UNA rivista: controllo con la verifica dei riferimenti, poi i pacchetti

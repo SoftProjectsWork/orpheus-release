@@ -158,7 +158,7 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def separate(conn: sqlite3.Connection, home: Path, inbox_dir: str = "inbox") -> dict:
+def separate(conn: sqlite3.Connection, home: Path, inbox_dir: str = "inbox", locator=None) -> dict:
     """Move the PDFs that are not complete articles out of the inbox, into ORPHEUS_HOME/non_completi/<folder>/.
 
     Only files still where they were read (inside the inbox), with the same sha256 as then; never overwrites;
@@ -175,8 +175,13 @@ def separate(conn: sqlite3.Connection, home: Path, inbox_dir: str = "inbox") -> 
         if rel.is_absolute() or ":" in rel.parts[0] or rel.parts[0] != inbox_dir:
             continue
         src = home.joinpath(*rel.parts)
-        if not src.is_file():
-            continue                                   # already moved, or removed by the user
+        if not src.is_file():                          # T-054: moved inside the inbox (another folder)? find it
+            from .layout import PdfLocator
+            locator = locator or PdfLocator(home, inbox_dir)
+            src = locator.find(row["original_path"], row["file_sha256"])
+            if src is None or locator.where(src)["cartella"] in (None, "fuori", SEPARATED_DIR) \
+                    or not str(src.resolve()).startswith(str((home / inbox_dir).resolve())):
+                continue                               # already separated, or removed by the user
         item = {"file": src.name, "contenuto": c["classe"], "motivo": c["motivo"]}
         try:
             if _sha256(src) != row["file_sha256"]:

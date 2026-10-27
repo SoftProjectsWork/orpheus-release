@@ -204,6 +204,11 @@ class CrossrefClient:
         public = work_url(doi)
         return self._request(public, f"{public}?mailto={quote(self.contact_email, safe='@')}", doi, (200, 404))
 
+    def get_journal(self, issn: str) -> Response:
+        """GET /journals/{issn} (T-054, "Compila dall'ISSN"): title, publisher, ISSNs with their type. 200 and 404."""
+        public = f"{API_BASE}/journals/{quote(issn, safe='-')}"
+        return self._request(public, f"{public}?mailto={quote(self.contact_email, safe='@')}", f"ISSN {issn}", (200, 404))
+
     def works_by_dois(self, dois: list[str], select: str = BATCH_SELECT) -> Response:
         """GET /works?filter=doi:A,doi:B,… (the same filter repeated is an OR) with only the `select` fields:
         one request for up to MAX_DOIS_PER_REQUEST DOIs. DOIs that Crossref does not know are simply absent

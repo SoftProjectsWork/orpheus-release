@@ -60,7 +60,9 @@ inbox\\riviste\\<sigla>\\articoli\\
     Articoli pubblicati da quella rivista. Puoi creare sottocartelle (per anno, per tema).
 
 inbox\\articoli_vari\\
-    Articoli di altre riviste o che non vuoi ancora assegnare.
+    Articoli di qualsiasi rivista. Dopo la verifica del DOI ORPHEUS riconosce la rivista (se manca, la aggiunge
+    all'elenco) e sposta il PDF in riviste\\<sigla>\\articoli, con un registro in rapporti\\spostamenti. I PDF
+    senza rivista restano qui: la scegli tu nel cruscotto (Articoli, "Da assegnare").
 
 PDF messi altrove dentro inbox vengono segnalati e non letti.
 
@@ -224,3 +226,150 @@ def read_journal_list(path: Path) -> tuple[list[dict], list[str]]:
                 problems.append(f"riga {line_no}: {col} {value!r} non valido (controlla la cifra finale)")
         rows.append(values)
     return rows, problems
+
+
+# ---------------------------------------------------------------- T-054 passo 2: where a PDF is now
+
+SEPARATED_DIR = "non_completi"           # content.SEPARATED_DIR (kept here to avoid an import cycle)
+DUPLICATES_DIR = "doppioni"              # inbox/doppioni: a copy with the same fingerprint as a file already in place
+LOCATOR_INDEX = "pdf_posizioni.json"     # in the PC's local folder: {path: [size, mtime_ns, sha256]}
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class PdfLocator:
+    """Finds the PDF of a document where it is NOW (rules locate-v1).
+
+    `original_path` stays the provenance in the database (no migration). A PDF moved by the user or by ORPHEUS
+    (articoli_vari → riviste/<sigla>/articoli, non_completi, a renamed journal folder) is found again by its fingerprint:
+      1. original_path, if the file is there with the same SHA-256;
+      2. a file with the same name under inbox/ and non_completi/ with the same SHA-256;
+      3. any PDF under inbox/ and non_completi/ with the same SHA-256.
+    The fingerprints are kept in the PC's local folder (path, size, modification time) and recomputed only for files
+    that changed. A file with the same name but another fingerprint is NOT the document ("non trovato")."""
+
+    def __init__(self, home: Path, inbox_dir: str = "inbox", local_root: Path | None = None):
+        self.home = Path(home)
+        self.inbox_dir = inbox_dir
+        self.index_path = Path(local_root) / LOCATOR_INDEX if local_root else None
+        self._cache: dict | None = None
+        self._by_sha: dict[str, list[Path]] | None = None
+        self._dirty = False
+
+    def _roots(self) -> list[Path]:
+        return [self.home / self.inbox_dir, self.home / SEPARATED_DIR]
+
+    def _load(self) -> dict:
+        if self._cache is None:
+            import json
+            self._cache = {}
+            if self.index_path is not None:
+                try:
+                    self._cache = json.loads(self.index_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    self._cache = {}
+        return self._cache
+
+    def sha_of(self, path: Path) -> str | None:
+        cache = self._load()
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        key = str(path)
+        hit = cache.get(key)
+        if hit and hit[0] == st.st_size and hit[1] == st.st_mtime_ns:
+            return hit[2]
+        try:
+            sha = _sha256(path)
+        except OSError:
+            return None
+        cache[key] = [st.st_size, st.st_mtime_ns, sha]
+        self._dirty = True
+        return sha
+
+    def _index(self) -> dict[str, list[Path]]:
+        if self._by_sha is None:
+            self._by_sha = {}
+            seen = set()
+            for root in self._roots():
+                if not root.is_dir():
+                    continue
+                for p in sorted(root.rglob("*")):
+                    if p.is_file() and p.suffix.lower() == ".pdf":
+                        seen.add(str(p))
+                        sha = self.sha_of(p)
+                        if sha:
+                            self._by_sha.setdefault(sha, []).append(p)
+            cache = self._load()
+            for k in [k for k in cache if k not in seen]:
+                del cache[k]
+                self._dirty = True
+            self.save()
+        return self._by_sha
+
+    def refresh(self) -> None:
+        """Forget the file list (after moving files); the fingerprints of unchanged files stay."""
+        self._by_sha = None
+
+    def save(self) -> None:
+        if not self._dirty or self.index_path is None:
+            return
+        import json
+        import os
+        try:
+            self.index_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.index_path.with_name(self.index_path.name + ".tmp")
+            tmp.write_text(json.dumps(self._cache), encoding="utf-8")
+            os.replace(tmp, self.index_path)
+            self._dirty = False
+        except OSError:
+            pass
+
+    def original(self, original_path: str | None) -> Path | None:
+        if not original_path:
+            return None
+        p = Path(original_path.replace("\\", "/"))
+        return p if p.is_absolute() else self.home.joinpath(*p.parts)
+
+    def find(self, original_path: str | None, sha: str | None) -> Path | None:
+        """The file of the document now, or None."""
+        first = self.original(original_path)
+        if first is not None and first.is_file() and (not sha or self.sha_of(first) == sha):
+            return first
+        if not sha:
+            return None
+        hits = self._index().get(sha) or []
+        hits = [h for h in hits if h.is_file()]
+        if not hits:
+            return None
+        name = first.name.lower() if first is not None else ""
+        same_name = [h for h in hits if h.name.lower() == name]
+        return (same_name or hits)[0]
+
+    def where(self, path: Path | None) -> dict:
+        """{"cartella": "riviste"/"articoli_vari"/"non_completi"/..., "sigla": ..., "sotto": "articoli"/"linee_guida"}"""
+        if path is None:
+            return {"cartella": None, "sigla": None, "sotto": None}
+        try:
+            rel = Path(path).resolve().relative_to(self.home.resolve()).parts
+        except ValueError:
+            return {"cartella": "fuori", "sigla": None, "sotto": None}
+        if len(rel) >= 2 and rel[0] == self.inbox_dir:
+            if rel[1] == JOURNALS_DIR and len(rel) >= 4:
+                return {"cartella": JOURNALS_DIR, "sigla": rel[2], "sotto": rel[3]}
+            return {"cartella": rel[1], "sigla": None, "sotto": None}
+        return {"cartella": rel[0] if rel else None, "sigla": None, "sotto": None}
+
+
+def locate_document(home: Path, doc, *, inbox_dir: str = "inbox", locator: PdfLocator | None = None) -> Path | None:
+    """Where the PDF of a document row (original_path, file_sha256) is now; None when it is not on this disk."""
+    loc = locator or PdfLocator(home, inbox_dir)
+    return loc.find(doc["original_path"], doc["file_sha256"])

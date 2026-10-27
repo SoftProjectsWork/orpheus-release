@@ -237,7 +237,8 @@ def parse_source(body: bytes) -> dict:
     stats = data.get("summary_stats") or {}
     return {"id": data["id"], "display_name": data.get("display_name"), "type": data.get("type"),
             "issn": {normalize_issn(i) for i in data.get("issn") or [] if isinstance(i, str) and is_valid_issn(i)},
-            "issn_l": data.get("issn_l"), "two_year_mean_citedness": stats.get("2yr_mean_citedness"),
+            "issn_l": data.get("issn_l"), "homepage_url": data.get("homepage_url"),
+            "host_organization_name": data.get("host_organization_name"), "two_year_mean_citedness": stats.get("2yr_mean_citedness"),
             "h_index": stats.get("h_index"), "works_count": data.get("works_count"),
             "cited_by_count": data.get("cited_by_count")}
 

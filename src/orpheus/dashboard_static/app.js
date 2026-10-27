@@ -512,7 +512,8 @@ sections.articoli = async () => {
       return b;
     }))));
   put(view, ...head("Articoli", "Tutti gli articoli nel database. Filtra, ordina con un clic sulle colonne, apri un articolo per vedere scheda, affermazioni e verifiche.",
-    refreshButton(() => { clearCache(); route(); })), await actionBlock("aggiorna_articoli"), ...(await cardsBlocks()), filters, holder, srcLine(d));
+    refreshButton(() => { clearCache(); route(); })), await actionBlock("aggiorna_articoli"), await unassignedBlock(),
+    ...(await cardsBlocks()), filters, holder, srcLine(d));
   render();
 };
 
@@ -706,7 +707,7 @@ sections.riviste = async () => {
   renderPick();
   renderTables();
   put(view, ...head("Riviste", "Le riviste dell'elenco: metriche ufficiali con anno e fornitore, linee guida (data più recente) e regole per gli autori lette dalle schede. Scegli quali mettere a confronto.",
-    refreshButton(() => { clearCache(); route(); })), await actionBlock("aggiorna_riviste"),
+    refreshButton(() => { clearCache(); route(); })), await actionBlock("aggiorna_riviste"), await journalListBlock(),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Riviste da confrontare"),
       h("span", {class: "muted"}, "la scelta resta salvata in questo browser")), pickHolder),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Metriche e linee guida")), holder,
@@ -732,6 +733,147 @@ function loadPick(all, rows) {
 }
 function savePick(set) {
   try { localStorage.setItem(PICK_KEY, JSON.stringify([...set])); } catch (e) { /* storage not available */ }
+}
+
+/* T-054: the journal list (riviste_prioritarie.csv) from the page — "Nuova rivista" and "Modifica" */
+const JCOLS = [["sigla", "Sigla", "es. JSAMS (lettere, numeri, - e _)"], ["titolo", "Titolo", "nome completo della rivista"],
+  ["issn_print", "ISSN stampa", "1234-567X"], ["issn_online", "ISSN online", "1234-567X"],
+  ["sito_ufficiale", "Sito ufficiale", "https://…"], ["url_istruzioni_autori", "Istruzioni per gli autori", "https://…"],
+  ["priorita", "Priorità", "facoltativa"], ["note", "Note", "facoltative"]];
+async function journalListBlock() {
+  let d;
+  try { d = await get("/api/riviste/elenco"); } catch (e) { return h("section", {class: "block"}, errorBox(e)); }
+  const box = h("section", {class: "block", "aria-labelledby": "h-jlist"});
+  const formBox = h("div");
+  const msg = h("p", {role: "status", class: "muted"});
+  const auto = d.righe.filter((r) => r.automatica);
+  let filter = "";
+  const listBox = h("div");
+  const renderList = () => {
+    const q = filter.trim().toLowerCase();
+    const rows = d.righe.filter((r) => !q || `${r.sigla} ${r.titolo} ${r.issn_print} ${r.issn_online}`.toLowerCase().includes(q));
+    put(listBox, rows.length ? h("div", {class: "table-wrap"}, h("table", null,
+      h("thead", null, h("tr", null, ["Sigla", "Titolo", "ISSN", "Stato", ""].map((x) => h("th", {scope: "col"}, x)))),
+      h("tbody", null, rows.map((r) => h("tr", null,
+        h("td", null, h("b", null, r.sigla)), h("td", null, r.titolo),
+        h("td", null, [r.issn_print, r.issn_online].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(" · ") || "—"),
+        h("td", null, r.automatica ? tag("aggiunta automatica", "warn") : null, " ", r.nel_database ? null : tag("non ancora nel database")),
+        h("td", null, h("button", {type: "button", class: "btn small", onclick: () => openForm(r)}, "Modifica")))))))
+      : h("p", {class: "empty"}, "Nessuna rivista con questo filtro."));
+  };
+  const openForm = (row) => {
+    const f = {}, errs = {};
+    const original = row ? row.sigla : null;
+    const fieldsOut = JCOLS.map(([k, label, ph]) => {
+      f[k] = h("input", {type: "text", name: k, value: row ? row[k] || "" : "", placeholder: ph,
+        required: k === "sigla" || k === "titolo" ? true : null, oninput: debounce(check, 300)});
+      errs[k] = h("span", {class: "fld-err", role: "alert"});
+      return h("label", {class: "fld"}, h("span", null, label), f[k], errs[k]);
+    });
+    const values = () => Object.fromEntries(Object.entries(f).map(([k, el]) => [k, el.value.trim()]));
+    const out = h("p", {class: "muted", role: "status"});
+    async function check() {
+      try {
+        const r = await postJson("/api/riviste/controlla", {valori: values(), sigla_originale: original});
+        for (const [k, el] of Object.entries(errs)) {
+          el.textContent = r.problemi[k] ? t(r.problemi[k]) : "";
+          f[k].setAttribute("aria-invalid", r.problemi[k] ? "true" : "false");
+        }
+        return r.problemi;
+      } catch (e) { out.textContent = e.message; return {x: e.message}; }
+    }
+    const fill = h("button", {type: "button", class: "btn", onclick: async () => {
+      const issn = f.issn_print.value.trim() || f.issn_online.value.trim();
+      if (!issn) { out.textContent = t("Scrivi prima un ISSN (stampa o online)."); f.issn_print.focus(); return; }
+      fill.disabled = true; out.textContent = t("Chiedo a Crossref e OpenAlex…");
+      try {
+        const r = await postJson("/api/riviste/compila", {issn});
+        for (const [k, v] of Object.entries(r.valori)) if (f[k] && v && (!f[k].value.trim() || k !== "sigla")) f[k].value = v;
+        out.textContent = [r.fonti.length ? `${t("Compilato da")} ${r.fonti.join(", ")}.` : "",
+          r.valori.editore ? `${t("Editore")}: ${r.valori.editore}.` : "", ...r.note.map((x) => t(x) + ".")].filter(Boolean).join(" ")
+          + " " + t("Controlla e correggi prima di salvare.");
+        check();
+      } catch (err) { out.textContent = err.message; }
+      fill.disabled = false;
+    }}, "Compila dall'ISSN");
+    const form = h("form", {class: "jform", onsubmit: async (e) => {
+      e.preventDefault();
+      const probs = await check();
+      if (Object.keys(probs).length) { out.textContent = t("Correggi i campi segnati."); return; }
+      const btn = form.querySelector("button[type=submit]");
+      btn.disabled = true; out.textContent = t("Salvo…");
+      try {
+        const r = await postJson("/api/riviste/salva", {valori: values(), sigla_originale: original});
+        clearCache();
+        msg.textContent = `${t("Salvata")} ${r.sigla}. ` + (r.elenco.copia ? `${t("Copia del vecchio elenco")}: ${r.elenco.copia}. ` : "")
+          + (r.cartelle_spostate.length ? `${t("Cartella rinominata")}: ${r.cartelle_spostate[0].da} → ${r.cartelle_spostate[0].a}. ` : "")
+          + (r.rivista && r.rivista.azione === "nuova" ? t("Rivista scritta nel database.") : "");
+        d = await get("/api/riviste/elenco", true);
+        formBox.replaceChildren(); renderList();
+      } catch (err) { out.textContent = err.message; btn.disabled = false; }
+    }},
+      h("h3", null, row ? `${t("Modifica")} ${row.sigla}` : t("Nuova rivista")),
+      h("div", {class: "form-grid"}, fieldsOut),
+      h("div", {class: "action-row"}, fill, " ", h("button", {type: "submit", class: "btn primary"}, "Salva"), " ",
+        h("button", {type: "button", class: "btn", onclick: () => formBox.replaceChildren()}, "Annulla")),
+      out,
+      h("p", {class: "src"}, row
+        ? "Salva = la riga cambia in riviste_prioritarie.csv (prima una copia in data\\archive). Se cambi la sigla, la cartella della rivista viene rinominata (registro in rapporti\\spostamenti)."
+        : "Salva = una riga nuova in riviste_prioritarie.csv (prima una copia in data\\archive), le cartelle linee_guida e articoli, la rivista nel database."));
+    put(formBox, form);
+    setTimeout(() => f[row ? "titolo" : "sigla"].focus(), 0);
+    if (row) check();
+  };
+  put(box, h("div", {class: "block-head"}, h("h2", {id: "h-jlist"}, "Elenco delle riviste"),
+      h("button", {type: "button", class: "btn primary", onclick: () => openForm(null)}, "Nuova rivista")),
+    auto.length ? h("p", {class: "notice"}, `${t("Riviste aggiunte in automatico dai PDF")}: ${auto.map((r) => r.sigla).join(", ")}. `
+      + t("La sigla è proposta dalle iniziali del titolo: cambiala con \"Modifica\" se vuoi.")) : null,
+    formBox, msg,
+    d.righe.length > 8 ? h("label", {class: "field"}, "Cerca una rivista", h("input", {type: "search", placeholder: "sigla, nome o ISSN",
+      oninput: debounce((e) => { filter = e.target.value; renderList(); }, 150)})) : null,
+    listBox, srcLine(d, t("Le scritture fanno prima una copia di sicurezza del database se l'ultima è vecchia.")));
+  renderList();
+  return box;
+}
+
+/* T-054: PDFs of articoli_vari without a journal — the user chooses ("Elenco + scelta a mano") */
+async function unassignedBlock() {
+  let d;
+  try { d = await get("/api/articoli/da-assegnare"); } catch (e) { return null; }
+  const box = h("section", {class: "block", "aria-labelledby": "h-unas"});
+  const msg = h("p", {role: "status", class: "muted"});
+  const render = () => {
+    put(box, h("div", {class: "block-head"}, h("h2", {id: "h-unas"}, "Da assegnare"),
+        h("span", {class: "muted"}, `${fmtN(d.righe.length)} PDF in articoli_vari senza rivista`)),
+      d.righe.length ? h("p", {class: "muted"}, "ORPHEUS non ha riconosciuto la rivista (DOI assente o non confermato da Crossref). Scegli la rivista: il PDF va nella sua cartella articoli. \"Probabile\" = l'ISSN della rivista è stampato nelle prime pagine.")
+        : h("p", {class: "empty"}, "Nessun PDF da assegnare."),
+      d.righe.length ? h("div", {class: "table-wrap"}, h("table", null,
+        h("thead", null, h("tr", null, ["File", "Pagine", "Titolo nel PDF", "DOI", "Crossref", "Rivista"].map((x, i) => h("th", {scope: "col", class: i === 1 ? "n" : null}, x)))),
+        h("tbody", null, d.righe.map((r) => {
+          const sel = h("select", {"aria-label": `Rivista per ${r.file}`},
+            h("option", {value: ""}, t("— scegli —")),
+            d.riviste.map((j) => h("option", {value: j.sigla, selected: r.probabile && r.probabile.sigla === j.sigla ? true : null},
+              `${j.sigla}${j.titolo ? " - " + j.titolo : ""}${r.probabile && r.probabile.sigla === j.sigla ? " " + t("(probabile)") : ""}`)));
+          const btn = h("button", {type: "button", class: "btn small primary", onclick: async () => {
+            if (!sel.value) { msg.textContent = t("Scegli la rivista."); sel.focus(); return; }
+            btn.disabled = true;
+            try {
+              const out = await postJson("/api/articoli/assegna", {document_id: r.document_id, sigla: sel.value});
+              msg.textContent = `${r.file} → ${out.spostati.length ? out.spostati[0].a : sel.value}`;
+              clearCache();
+              d = await get("/api/articoli/da-assegnare", true); render();
+            } catch (e) { msg.textContent = e.message; btn.disabled = false; }
+          }}, "Assegna");
+          return h("tr", null, h("td", null, r.file), h("td", {class: "n"}, fmtN(r.pagine)),
+            h("td", {lang: "en"}, r.titolo_pdf || "—"), h("td", null, r.doi_candidato || "—"), h("td", null, r.esito_crossref),
+            h("td", null, h("div", {class: "assign"}, sel, btn), r.probabile ? tag("probabile: " + r.probabile.sigla, "acc") : null));
+        })))) : null,
+      d.non_ancora_letti.length ? h("p", {class: "muted"}, `${t("PDF in articoli_vari non ancora letti")}: ${fmtN(d.non_ancora_letti.length)}. ${t("Premi \"Aggiungi e verifica gli articoli nuovi\": li legge, verifica i DOI, riconosce le riviste e li sposta.")}`) : null,
+      d.da_spostare ? h("p", {class: "muted"}, `${t("PDF con la rivista riconosciuta, da spostare")}: ${fmtN(d.da_spostare)}.`) : null,
+      msg, srcLine(d, d.ultimo_registro ? `${t("Ultimo registro degli spostamenti")}: ${d.ultimo_registro}.` : null));
+  };
+  render();
+  return box;
 }
 
 /* manuscripts (T-037, Fase 6): a .docx of the manuscripts folder against the journal cards; nothing is written */

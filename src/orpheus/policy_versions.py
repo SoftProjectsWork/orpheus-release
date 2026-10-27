@@ -191,7 +191,7 @@ def _present(home: Path | None, original: str | None) -> bool:
 
 
 def plan(conn: sqlite3.Connection, journal_list: list[dict], *, tz: tzinfo | None = None,
-         home: Path | None = None) -> dict:
+         home: Path | None = None, locator=None) -> dict:
     """What `write` would do: one row per guideline PDF ("linee_guida") and one per journal ("versioni"). Read-only."""
     journals = journal_by_sigla(conn, journal_list)
     listed_url = {r["sigla"].lower(): clean_url(r.get("url_istruzioni_autori")) for r in journal_list if r.get("sigla")}
@@ -202,6 +202,16 @@ def plan(conn: sqlite3.Connection, journal_list: list[dict], *, tz: tzinfo | Non
             "SELECT text FROM document_page WHERE document_id = ? ORDER BY page_no", (d["id"],))]
         name = _file_name(d["original_path"])
         sigla = d["journal_hint"]
+        present = _present(home, d["original_path"])
+        if home is not None:                          # T-054: the folder where the PDF is NOW decides the journal
+            from .layout import GUIDELINES_DIR, PdfLocator
+            locator = locator or PdfLocator(home)
+            now = locator.find(d["original_path"], d["file_sha256"])
+            where = locator.where(now)
+            if now is not None and where["sotto"] == GUIDELINES_DIR:
+                present = True
+                if where["sigla"]:
+                    sigla = where["sigla"]
         jid = journals.get((sigla or "").lower())
         sha, text, url, header = fingerprint(pages)
         printed = print_time(header, d["ingested_at"], tz)
@@ -220,7 +230,7 @@ def plan(conn: sqlite3.Connection, journal_list: list[dict], *, tz: tzinfo | Non
                                                      "la rivista in riviste_prioritarie.csv)")
         elif len(text) < 200:
             item.update(azione="non scritta", motivo="testo del PDF troppo corto o assente (PDF scansionato?)")
-        elif not _present(home, d["original_path"]):
+        elif not present:
             item.update(azione="fuori dalla versione", motivo="il file non è più nella cartella linee_guida")
         else:
             item["azione"] = "nella versione"

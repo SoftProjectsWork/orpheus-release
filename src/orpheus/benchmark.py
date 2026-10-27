@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
+from . import layout
 from .content import COMPLETE, classify_all
 from .quality import REPORTS_DIR
 from .verify_doi import OUTCOME_IT, _YEAR_IN_NAME, candidates, latest_checks
@@ -69,7 +70,7 @@ def _clean(text) -> str:
     return re.sub(r"\s+", " ", str(text)).strip() if text is not None else ""
 
 
-def _row(conn: sqlite3.Connection, doc: sqlite3.Row, check: sqlite3.Row, group: str) -> dict:
+def _row(conn: sqlite3.Connection, doc: sqlite3.Row, check: sqlite3.Row, group: str, locator=None, home=None) -> dict:
     details = json.loads(check["details"] or "{}")
     cr = details.get("crossref") or {}
     checks = details.get("controlli") or {}
@@ -82,6 +83,10 @@ def _row(conn: sqlite3.Connection, doc: sqlite3.Row, check: sqlite3.Row, group: 
         authors_txt += f"; … ({total} in tutto)"
     year = art["publication_year"] if art and art["publication_year"] else (cr.get("years") or [""])[0]
     where = PurePosixPath(doc["original_path"].replace("\\", "/"))
+    if locator is not None:                       # T-054: where the PDF is now (moved by the user or by ORPHEUS)
+        now = locator.find(doc["original_path"], doc["file_sha256"])
+        if now is not None:
+            where = PurePosixPath(layout.shown_path(locator.home, now))
     name = where.name
     m = _YEAR_IN_NAME.search(name)
     return {
@@ -101,7 +106,7 @@ def _row(conn: sqlite3.Connection, doc: sqlite3.Row, check: sqlite3.Row, group: 
     }
 
 
-def build(conn: sqlite3.Connection, size: int = SIZE, seed: str = SEED) -> Sample:
+def build(conn: sqlite3.Connection, size: int = SIZE, seed: str = SEED, locator=None) -> Sample:
     latest = latest_checks(conn)
     classes = classify_all(conn)
     by_group: dict[str, dict[str, sqlite3.Row]] = {g: {} for g in GROUPS}
@@ -120,7 +125,7 @@ def build(conn: sqlite3.Connection, size: int = SIZE, seed: str = SEED) -> Sampl
     out.chosen = {GROUPS[0]: first, GROUPS[1]: min(size - first, out.population[GROUPS[1]])}
     for g in GROUPS:
         for doc_id in pick(list(by_group[g]), out.chosen[g], seed):
-            out.rows.append(_row(conn, by_group[g][doc_id], latest[doc_id], g))
+            out.rows.append(_row(conn, by_group[g][doc_id], latest[doc_id], g, locator))
     for n, r in enumerate(out.rows, 1):
         r["n"] = n
     return out

@@ -391,3 +391,12 @@ ul.plain li{padding:8px 0;border-top:1px solid var(--rule);display:flex;flex-wra
 a.btn{color:var(--ink);text-decoration:none}
 input.file-hidden{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
 input.file-hidden:focus-visible+label.file-pick{outline:2px solid var(--accent);outline-offset:2px}
+/* T-054: journal list window and "Da assegnare" */
+.fld-err{color:var(--crit-ink);font-size:12px;min-height:0}
+.fld-err:empty{display:none}
+.fld input[aria-invalid="true"]{border-color:var(--crit)}
+.jform{border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:10px;padding:12px 14px;margin:0 0 12px}
+.jform h3{margin:0 0 10px;font-size:15px}
+.assign{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.assign select{max-width:260px;font:inherit;padding:4px 6px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);color:var(--ink)}
+.jform .form-grid{align-items:start}

@@ -137,7 +137,40 @@ def journals_to_write(env: Env) -> int:
     p = journal_table.plan(env.conn, env.home, rows)
     n = p["articoli_da_collegare"] + sum(1 for r in p["riviste"] if r["azione"] == "nuova")
     n += sum(len(r.get("tipi_da_completare") or []) for r in p["riviste"])
-    return n + policy_versions.plan(env.conn, rows, home=env.home)["da_scrivere"]
+    locator = layout.PdfLocator(env.home, env.project.storage.inbox_dir, env.local_root)
+    return n + policy_versions.plan(env.conn, rows, home=env.home, locator=locator)["da_scrivere"]
+
+
+def journals_to_fix(env: Env) -> int:
+    """T-054 passo 3: siglas, folders and URLs of the journal list to fix (sistema-riviste)."""
+    from . import journal_folders as jf
+    from .journal_list_write import JournalList, ListError
+    try:
+        jl = JournalList.load(env.home / env.project.storage.journals_csv)
+    except ListError:
+        return 0
+    if not jl.data_rows():
+        return 0
+    loc = layout.PdfLocator(env.home, env.project.storage.inbox_dir, env.local_root)
+    n = jf.plan_fix(env.conn, env.home, env.project.storage.inbox_dir, jl, loc)["da_fare"]
+    loc.save()
+    return n
+
+
+def journals_to_recognise(env: Env) -> int:
+    """T-054 passo 4: journals of confirmed articles not in the list, and PDFs of articoli_vari to move."""
+    from . import journal_folders as jf
+    from .journal_list_write import JournalList, ListError
+    try:
+        jl = JournalList.load(env.home / env.project.storage.journals_csv)
+    except ListError:
+        return 0
+    inbox = env.project.storage.inbox_dir
+    n = len(jf.plan_recognise(env.conn, env.home, jl, inbox_dir=inbox)["nuove"])
+    loc = layout.PdfLocator(env.home, inbox, env.local_root)
+    n += jf.plan_moves(env.conn, env.home, inbox, jl.data_rows(), loc)["da_fare"]
+    loc.save()
+    return n
 
 
 def pubmed_to_ask(env: Env) -> int:
@@ -235,10 +268,14 @@ def report_to_write(env: Env) -> int:
 
 
 STEPS: tuple[Step, ...] = (
+    Step("sistema_riviste", "Sigle e cartelle delle riviste", (("sistema-riviste",),), journals_to_fix,
+         "sigle, cartelle o indirizzi"),
     Step("leggi", "Lettura dei PDF nuovi", (("ingest-inbox",), ("separa-non-completi",)), pdfs_to_read, "PDF nuovi"),
     Step("verifica_doi", "Verifica dei DOI con Crossref",
          (("verify-dois",), ("cerca-doi",), ("verify-dois", "--rivaluta"), ("separa-non-completi",)),
          dois_to_verify, "PDF", network=True),
+    Step("riconosci", "Riviste riconosciute dai PDF e articoli nelle cartelle delle riviste",
+         (("riconosci-riviste",), ("sposta-articoli",)), journals_to_recognise, "riviste o PDF", network=True),
     Step("riviste", "Riviste e linee guida", (("scrivi-riviste",), ("linee-guida",)), journals_to_write,
          "articoli o linee guida"),
     Step("verifica_pubmed", "Verifica con PubMed", (("verifica-pubmed",),), pubmed_to_ask, "articoli", network=True),
@@ -268,10 +305,10 @@ BY_KEY = {s.key: s for s in STEPS}
 GROUPS: dict[str, dict] = {
     "tutto": {"titolo": "Tutto quello che manca", "passi": tuple(s.key for s in STEPS)},
     "articoli": {"titolo": "Articoli nuovi: lettura e verifiche",
-                 "passi": ("leggi", "verifica_doi", "riviste", "verifica_pubmed", "europepmc", "citazioni", "autori",
+                 "passi": ("leggi", "verifica_doi", "riconosci", "riviste", "verifica_pubmed", "europepmc", "citazioni", "autori",
                            "segmenta", "vettori", "modello", "report")},
     "riviste": {"titolo": "Riviste: elenco, linee guida, schede e metriche",
-                "passi": ("riviste", "schede_riviste", "metriche", "report")},
+                "passi": ("sistema_riviste", "riviste", "schede_riviste", "metriche", "report")},
     "conoscenza": {"titolo": "Lavoro di Claude: schede, affermazioni e ricerca",
                    "passi": ("schede", "segmenta", "vettori", "affermazioni", "report")},
 }
