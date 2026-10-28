@@ -475,6 +475,8 @@ self.ORPHEUS_EN = {
   "dalla risposta ai revisori": "from the response to the reviewers", "seguito": "followed", "Usa": "Use",
   "modificato": "changed", "chiarito": "clarified", "non modificato": "not changed",
   "Confronto tra condizioni o arti negli stessi soggetti": "Comparison between conditions or limbs in the same subjects",
+  "Nessuna rivista controllata.": "No journal checked.", "Non trovo una scheda per": "No card found for",
+  "Controlla in Riviste che la rivista abbia la scheda e la sigla nell'elenco delle riviste.": "Check in Journals that the journal has a card and an abbreviation in the journal list.",
 };
 
 self.ORPHEUS_EN_TPL = [

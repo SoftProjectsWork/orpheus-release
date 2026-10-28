@@ -121,7 +121,11 @@ def pick_journals(conn, journal_list: list[dict], wanted: list[str] | None) -> t
         return allj, []
     out, unknown = [], []
     for w in wanted:
-        hit = next((j for j in allj if w.lower() in ((j["sigla"] or "").lower(), j["id"].lower())), None)
+        # 2026-10-28 (bug seen on a colleague's PC): a journal without sigla on this PC (not in its
+        # riviste_prioritarie.csv, card received with the sharing) is offered by its title, so the title matches too.
+        key = w.strip().lower()
+        hit = next((j for j in allj if key in ((j["sigla"] or "").lower(), j["id"].lower())), None) \
+            or next((j for j in allj if key == (j["titolo"] or "").strip().lower()), None)
         if hit and hit not in out:
             out.append(hit)
         elif not hit:
@@ -1151,6 +1155,12 @@ def render_html(result: dict, file_name: str, now: datetime) -> str:
     out.append("<div class='kpi'>" + "".join(f"<div>{_e(k)}<b>{_e(_fmt(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v)}</b></div>"
                                              for k, v in kpi) + "</div>")
     out.append(f"<div class='sub'>Sezioni riconosciute: {_e(', '.join(s['sezioni']) or 'nessuna')}</div>")
+    if not result["riviste"]:                      # never stop in silence (2026-10-28)
+        unknown = ", ".join(result.get("riviste_sconosciute") or [])
+        out.append("<div class='note'><b>Nessuna rivista controllata.</b> "
+                   + (f"Non trovo una scheda per: {_e(unknown)}. " if unknown else "Non c'è nessuna scheda di rivista. ")
+                   + "Controlla in Riviste che la rivista abbia la scheda (dal PDF delle linee guida o scritta a mano) "
+                     "e la sigla nell'elenco delle riviste.</div>")
     if len(result["riviste"]) > 1:
         out.append("<h2>Riviste a confronto</h2><table><tr><th>Rivista</th><th>Tipo nella scheda</th>"
                    "<th>Vicinanza ai temi</th><th>SJR (quartile)</th>"

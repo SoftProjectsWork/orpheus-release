@@ -1374,6 +1374,11 @@ function msResult(r) {
     kpi(`${fmtN(m.corpo_pt)} pt`, "carattere", `${m.carattere || "?"}, interlinea ${m.interlinea}`),
     kpi(m.numeri_di_riga ? "sì" : "no", "numeri di riga"),
     kpi(fmtN(m.revisioni_non_accettate + m.commenti), "revisioni e commenti", "da togliere prima dell'invio")));
+  if (!r.riviste.length) {                       // never stop in silence (2026-10-28)
+    out.push(h("p", {class: "notice", role: "alert"}, h("b", null, t("Nessuna rivista controllata.")), " ",
+      (r.riviste_sconosciute || []).length ? `${t("Non trovo una scheda per")}: ${r.riviste_sconosciute.join(", ")}. ` : "",
+      t("Controlla in Riviste che la rivista abbia la scheda e la sigla nell'elenco delle riviste.")));
+  }
   if (r.riviste.length > 1) {
     const max = Math.max(...r.riviste.map((j) => j.conteggi["da correggere"] + j.conteggi["da guardare"] + j.conteggi["conforme"]), 1);
     const near = (j) => j.affinita ? j.affinita.vicinanza_temi : null;
