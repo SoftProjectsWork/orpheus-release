@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import (__version__, audit, card_store, claims, config, content, db, engine, journal_cards, layout, lineage,
-               policy_changes, policy_versions, report, semantic, verify_doi)
+from . import (__version__, audit, card_store, claims, config, content, db, engine, journal_cards, journal_profile, layout,
+               lineage, policy_changes, policy_versions, report, semantic, stats_terms, verify_doi)
 from .localstate import LocalState
 
 RULES_VERSION = "dashboard-v1"
@@ -333,6 +333,26 @@ def claims_list(s: Settings, conn) -> dict:
 
 
 # ---------------------------------------------------------------- journals
+
+def journal_profiles(s: Settings, conn) -> dict:
+    """T-057: profiles of the journals from their analysed articles (stats-terms), with the sigla of the list."""
+    sigla = _sigla_by_journal(conn, s.journal_list())
+    out = journal_profile.build(conn)
+    for r in out["riviste"]:
+        r["sigla"] = sigla.get(r["journal_id"])
+    status = stats_terms.status(conn)
+    last = _one(conn, "SELECT max(created_at) FROM text_structure WHERE rules = ?", stats_terms.RULES_VERSION)
+    return {**out, "stato": status, "precisione": stats_terms.checked_precision(conn),
+            **_src(f"PDF degli articoli completi, regole {stats_terms.RULES_VERSION} (comando metodi)", last)}
+
+
+def journal_profile_sentences(s: Settings, conn, sigla: str, term: str) -> dict:
+    jid = {v.lower(): k for k, v in _sigla_by_journal(conn, s.journal_list()).items() if v}.get((sigla or "").lower())
+    if jid is None or term not in stats_terms.TERMS_BY_KEY:
+        return {"frasi": [], "errore": "rivista o voce non trovata"}
+    return {"rivista": sigla, "voce": term, "nome": stats_terms.TERMS_BY_KEY[term].label,
+            "frasi": journal_profile.examples(conn, jid, term, limit=30)}
+
 
 def journals(s: Settings, conn) -> dict:
     jl = s.journal_list()
@@ -851,6 +871,60 @@ def _protected_write(s: Settings, conn, fn):
     return out
 
 
+# ---------------------------------------------------------------- T-056: submissions diary and lessons (R10: local only)
+
+def submissions_view(s: Settings, conn) -> dict:
+    """The diary of the user's submissions with letters, comments and labels, the lessons and the journals of the list.
+    Shown only in this page on this PC (R10): never logged, never shared."""
+    from . import submissions as sb
+    journals = [{"id": r["id"], "titolo": r["title"]} for r in conn.execute("SELECT id, title FROM journal ORDER BY title")]
+    return {**sb.diary(conn, home=s.home), "lezioni": sb.lessons(conn), "stato": sb.status(conn), "riviste": journals,
+            **_src("my_manuscript, submission, submission_event, submission_letter, reviewer_comment, comment_label "
+                   "(migrazione 0017, feedback-v1)", utc_now())}
+
+
+def submissions_write(s: Settings, conn, what: str, body: dict) -> dict:
+    """One write from the page (new paper, submission, event with the letter, correction, label decision), with the
+    protections of a command that writes (_protected_write)."""
+    from . import submissions as sb
+    g = lambda k: body.get(k)  # noqa: E731
+
+    def run():
+        if what == "lavoro":
+            return {"id": sb.add_manuscript(conn, g("nome") or "", title=g("titolo"), kind=g("tipo") or None,
+                                            note=g("nota"))}
+        if what == "nuova":
+            if not g("rivista_id"):
+                raise ValueError("scegli la rivista dall'elenco (se manca: Riviste → Nuova rivista)")
+            return {"id": sb.add_submission(conn, g("lavoro") or "", "", g("data") or "", journal_id=g("rivista_id"),
+                                            previous_id=g("precedente") or None, note=g("nota"))}
+        if what == "evento":
+            return sb.add_event(conn, g("sottomissione") or "", g("evento") or "", g("data") or "",
+                                round_no=g("giro") or 1, letter=g("lettera"), due_on=g("scadenza") or None,
+                                note=g("nota"))
+        if what == "correggi":
+            return {"id": sb.correct_event(conn, g("evento_id") or "", event=g("evento") or None,
+                                           event_on=g("data") or None, due_on=g("scadenza") or None, note=g("nota"),
+                                           round_no=g("giro") or None)}
+        if what == "togli_evento":
+            sb.remove_event(conn, g("evento_id") or "")
+            return {}
+        if what == "commento":
+            return sb.add_comment(conn, g("lettera") or "", g("chi") or "", g("testo") or "")
+        if what == "togli_commento":
+            sb.remove_comment(conn, g("commento") or "")
+            return {}
+        if what == "nessun_commento":
+            sb.set_no_comments(conn, g("lettera") or "", bool(g("valore")))
+            return {}
+        if what == "etichetta":
+            return {"id": sb.set_label(conn, g("commento") or "", category=g("categoria") or None,
+                                       severity=g("gravita") or None, followed=g("seguito") or None,
+                                       quote=g("citazione") or None)}
+        raise ValueError("azione sconosciuta")
+    return {"ok": True, **_protected_write(s, conn, run)}
+
+
 # ---------------------------------------------------------------- T-054: journal list and "Da assegnare"
 
 def _locator(s: Settings):
@@ -912,6 +986,27 @@ def journal_lookup(s: Settings, body: dict, *, clients=None) -> dict:
         clients = (cr.CrossrefClient(secrets.contact_email, max_retries=1),
                    journal_metrics.OpenAlexSources(secrets.contact_email, api_key=key, max_retries=1))
     return jf.lookup_issn(str(body.get("issn") or ""), crossref_client=clients[0], openalex_client=clients[1])
+
+
+def journal_card_view(conn, journal_id: str) -> dict:
+    """T-052: the card of a journal (PDF values and values by hand) for the page. Read-only."""
+    return {**journal_cards.card_view(conn, journal_id),
+            **_src("journal_card, journal_card_value e journal_card_manual (valori scritti a mano)", utc_now())}
+
+
+def journal_card_write(s: Settings, conn, what: str, body: dict) -> dict:
+    """T-052: a value by hand (new row, the old one superseded) or its withdrawal, with the protections of a command
+    that writes (_protected_write)."""
+    g = lambda k: body.get(k)  # noqa: E731
+    if what == "valore":
+        return {"ok": True, "id": _protected_write(s, conn, lambda: journal_cards.set_manual(
+            conn, str(g("journal_id") or ""), str(g("campo") or ""), value=g("valore"), source=str(g("fonte") or ""),
+            read_on=str(g("letto_il") or ""), article_type=g("tipo"), item=g("item") or 1, unit=g("unita"),
+            note=g("nota"), not_available=bool(g("non_indicato"))))}
+    if what == "togli":
+        _protected_write(s, conn, lambda: journal_cards.withdraw_manual(conn, str(g("id") or "")))
+        return {"ok": True}
+    raise ValueError("azione sconosciuta")
 
 
 def unassigned(s: Settings, conn) -> dict:
@@ -1228,6 +1323,20 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
             if conn is not None:
                 conn.close()
 
+    async def submissions_endpoint(request: Request):
+        what = request.path_params["what"]
+        return await journal_post(request, lambda c, b: submissions_write(s, c, what, b))
+
+    async def journal_card_endpoint(request: Request):
+        what = request.path_params["what"]
+        return await journal_post(request, lambda c, b: journal_card_write(s, c, what, b))
+
+    def journal_card_get(request, conn):
+        try:
+            return journal_card_view(conn, request.query_params.get("id") or "")
+        except journal_cards.ManualError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+
     async def assign_endpoint(request: Request):
         return await journal_post(request, lambda c, b: assign_journal(s, c, b))
 
@@ -1369,11 +1478,18 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
                                                      "titoli": {x["sigla"]: x.get("titolo") or x["sigla"]
                                                                 for x in s.journal_list() if x.get("sigla")},
                                                      "fonte": s.project.storage.journals_csv})),
+        Route("/api/sottomissioni", with_db(lambda r, c: submissions_view(s, c))),
+        Route("/api/sottomissioni/{what}", submissions_endpoint, methods=["POST"]),
         Route("/api/panoramica", with_db(lambda r, c: overview(s, c))),
         Route("/api/articoli", with_db(lambda r, c: articles(s, c))),
         Route("/api/articoli/da-assegnare", with_db(lambda r, c: unassigned(s, c))),
         Route("/api/articoli/assegna", assign_endpoint, methods=["POST"]),
         Route("/api/riviste/elenco", with_db(lambda r, c: journal_list_rows(s, c))),
+        Route("/api/riviste/profilo", with_db(lambda r, c: journal_profiles(s, c))),
+        Route("/api/riviste/profilo/frasi", with_db(lambda r, c: journal_profile_sentences(
+            s, c, r.query_params.get("rivista", ""), r.query_params.get("voce", "")))),
+        Route("/api/riviste/scheda", with_db(journal_card_get)),
+        Route("/api/riviste/scheda/{what}", journal_card_endpoint, methods=["POST"]),
         Route("/api/riviste/controlla", journal_check_endpoint, methods=["POST"]),
         Route("/api/riviste/salva", journal_save_endpoint, methods=["POST"]),
         Route("/api/riviste/compila", journal_lookup_endpoint, methods=["POST"]),

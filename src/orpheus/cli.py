@@ -125,6 +125,21 @@ Search by meaning (Fase 3, T-030..T-032; user's decisions of 2026-10-15: local m
                        in English; one line per article with page, section and passage (hybrid-v2)
   benchmark-ricerca [FILE]  recall@5/@10, hit@10, MRR of pagine (baseline), parole, significato, ibrida on the
                        questions checked by the user (rapporti/benchmark_ricerca_*_compilato.csv); read-only
+Methods and statistics of the published articles (T-057; user's decisions of 2026-10-27, migration 0016)
+  metodi [--prova]     statistical methods, reporting, software, transparency and structure of the complete articles
+                       (rules stats-terms-v1, deterministic, with page and sentence; never from the bibliography) into
+                       text_method_item and text_structure; unchanged articles are left as they are
+  profilo-rivista [SIGLA] [--voce TERM]  profile of the journals from their analysed articles (counts with N, per year);
+                       with --voce the sentences behind one count; read-only
+  obiettivi [--pacchetti N] [--rivista SIGLA] [--controlla SCHEDA PACCHETTO] [--prova]  T-057c (obiettivi-v1): objective and design
+                       of the articles in cards-v2: the cards of rapporti/schede_obiettivi/da_inviare into the database
+                       as proposals (backup first), then packets in rapporti/pacchetti_obiettivi until N are open (sport,
+                       exercise and biomechanics first); --controlla: the checks on one card, nothing written
+  riscontri [--controlla FILE PACCHETTO] [--prova]  T-056 (feedback-v1): the classifications of the comments of
+                       editors and reviewers written by Claude (rapporti/riscontri/da_inviare) into the database as
+                       proposals (backup first), then the packets of the letters still to classify; counts only (R10)
+  metodi-controllo     hand check of a sample of the items: the CSV to fill in, or — when a filled copy is there — its
+                       precision and the S/N written into text_method_check
 Claims and evidence (Fase 3, T-033; user's decisions of 2026-10-15: from the 30 cards, simple level, migration 0010)
   affermazioni         claims files in rapporti/affermazioni/da_inviare (claims-v1, written by Claude, in Italian or in
                        English: "lingua" it/en, one file per article and language): checked against the article's PDF
@@ -223,7 +238,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import (audit, ocr, backups, benchmark, card_store, claims, config, content, crossref, db, dedup, doi_search, engine, europepmc,
-               europepmc_survey, journal_metrics, journal_table,
+               europepmc_survey, journal_metrics, journal_profile, journal_table, stats_terms,
                journal_cards, journals, layout, lineage, openalex, policy_changes, policy_versions,
                pubmed, quality, references, report, search_benchmark, segments, semantic, transfer, verify_citations,
                verify_doi, verify_pubmed)
@@ -831,6 +846,151 @@ def _embedder(ctx, *, need: bool):
         if need:
             raise CliError(f"Ricerca per significato non disponibile: {exc}. Fai doppio clic su semantica.cmd.")
         return None
+
+
+def cmd_methods(args) -> int:
+    """metodi (T-057): statistical methods, transparency and structure of the complete articles (stats-terms-v1)."""
+    ctx = _open(write=not args.prova)
+    the_plan = stats_terms.plan(ctx.conn)
+    out = {"modo": "prova" if args.prova else "scrittura", "regole": stats_terms.RULES_VERSION,
+           "riepilogo": stats_terms.summary(the_plan)}
+    if not args.prova:
+        out["scritto"] = stats_terms.write(ctx.conn, the_plan)
+    out["nel_database"] = stats_terms.status(ctx.conn)
+    _print({**out, **_finish(ctx, wrote=not args.prova and out["scritto"]["articoli_cambiati"] > 0)})
+    return 0
+
+
+def cmd_journal_profile(args) -> int:
+    """profilo-rivista (T-057): read-only profile of the journals; with --voce the sentences behind one count."""
+    ctx = _open(write=False)
+    jid = None
+    if args.sigla:
+        jid = _sigla_by_journal_id(ctx).get(args.sigla.lower())
+        if jid is None:
+            raise CliError(f"Rivista {args.sigla!r} non trovata nell'elenco delle riviste.")
+    if args.voce:
+        if not jid:
+            raise CliError("Con --voce serve la sigla della rivista.")
+        if args.voce not in stats_terms.TERMS_BY_KEY:
+            raise CliError(f"Voce {args.voce!r} non nel dizionario {stats_terms.RULES_VERSION}.")
+        out = {"rivista": args.sigla, "voce": args.voce, "frasi": journal_profile.examples(ctx.conn, jid, args.voce)}
+    else:
+        out = journal_profile.build(ctx.conn, journal_id=jid)
+    _print({**out, **_finish(ctx, wrote=False)})
+    return 0
+
+
+def cmd_objectives(args) -> int:
+    """obiettivi (T-057c, obiettivi-v1): objective and design of the articles in the shared card cards-v2. --controlla:
+    the checks on one card against its packet (no database, for Claude); else the cards in da_inviare (backup first),
+    then new packets until --pacchetti are open (priority: sport, exercise and biomechanics first)."""
+    from . import objectives
+    if args.controlla:
+        card_path, packet_path = (Path(x) for x in args.controlla)
+        try:
+            data = json.loads(card_path.read_text(encoding="utf-8-sig"))
+            pk = json.loads(packet_path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            raise CliError(f"File non leggibile: {exc}") from exc
+        res = objectives.check_with_packet(data, pk)
+        _print({"esito": "accettabile" if res.accepted else "da correggere", "contratto": objectives.CONTRACT,
+                "controlli": {c.name: ("ok" if c.ok else "non superato") for c in res.checks},
+                "problemi": res.problems()[:60]})
+        return 0 if res.accepted else 4
+    ctx = _open(write=not args.prova)
+    out: dict = {"contratto": objectives.CONTRACT}
+    journal_id = None
+    if args.rivista:
+        listed, _problems = layout.read_journal_list(ctx.home / ctx.project.storage.journals_csv)
+        journal_id = policy_versions.journal_by_sigla(ctx.conn, listed).get(args.rivista.strip().lower())
+        if journal_id is None:
+            raise CliError(f"Rivista {args.rivista} non trovata nell'elenco o nel database (sigla di "
+                           f"riviste_prioritarie.csv, es. SJMSS)")
+        out["rivista"] = args.rivista.strip().upper()
+    if args.pacchetti > objectives.MAX_OPEN:
+        raise CliError(f"Al massimo {objectives.MAX_OPEN} pacchetti aperti alla volta")
+    files = objectives.to_send(ctx.home)
+    the_lot = objectives.lot(ctx.conn, max(0, args.pacchetti), journal_id=journal_id)
+    if args.prova:
+        out |= {"modo": "prova", "schede_da_inviare": len(files), "pacchetti_aperti": len(the_lot["aperti"]),
+                "pacchetti_nuovi": len(the_lot["nuovi"]), "da_fare": the_lot["da_fare"], "sul_tema": the_lot["sul_tema"],
+                "non_studi_esclusi": len(the_lot["non_studi"]), "non_studi": the_lot["non_studi"][:40],
+                "stato": objectives.status(ctx.conn)}
+        _print({**out, **_finish(ctx, wrote=False)})
+        return 0
+    wrote = False
+    if files or the_lot["nuovi"]:
+        entry = backups.make_backup(ctx.conn, ctx.state, reason="before_objectives")
+        out["backup_prima_della_scrittura"] = str(ctx.state.backup_dir / entry["file"])
+    if files:
+        out["invio"] = objectives.submit(ctx.conn, ctx.home, files)
+        wrote = True
+    the_lot = objectives.lot(ctx.conn, max(0, args.pacchetti), journal_id=journal_id)
+    res = objectives.issue_packets(ctx.conn, ctx.home, the_lot["aperti"] + the_lot["nuovi"],
+                                   project_name=ctx.project.name, project_version=ctx.project.version)
+    wrote = wrote or bool(res.created_runs)
+    objectives.to_send_dir(ctx.home).mkdir(parents=True, exist_ok=True)
+    out |= {"pacchetti": [{k: p[k] for k in ("article_id", "titolo", "pagine", "nuovo_file")} for p in res.issued],
+            "pacchetti_aperti": len(res.issued), "esecuzioni_nuove": res.created_runs, "problemi": res.problems,
+            "da_fare_dopo": the_lot["restano_dopo"], "sul_tema": the_lot["sul_tema"],
+            "aperti_della_rivista": (the_lot["aperti_della_rivista"] or 0) + len(the_lot["nuovi"])
+            if journal_id else None,
+            "non_studi_esclusi": len(the_lot["non_studi"]), "non_studi": the_lot["non_studi"][:40],
+            "cartella_pacchetti": str(objectives.packets_dir(ctx.home)),
+            "cartella_schede_da_inviare": str(objectives.to_send_dir(ctx.home)),
+            "stato": objectives.status(ctx.conn)}
+    _print({**out, **_finish(ctx, wrote=wrote)})
+    return 0 if not res.problems else 3
+
+
+def cmd_feedback(args) -> int:
+    """riscontri (T-056, feedback-v1): classification of the comments of editors and reviewers written by Claude.
+    --controlla: one file against its packet, nothing written; else the files in da_inviare (backup first), then the
+    packets of the letters still to classify. R10: the output has counts and keys only, never the text."""
+    from . import submissions as sb
+    if args.controlla:
+        try:
+            data = json.loads(Path(args.controlla[0]).read_text(encoding="utf-8-sig"))
+            pk = json.loads(Path(args.controlla[1]).read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            raise CliError(f"File non leggibile: {exc}") from exc
+        probs = sb.check_with_packet(data, pk)
+        _print({"esito": "accettabile" if not probs else "da correggere", "contratto": sb.CONTRACT, "problemi": probs[:60]})
+        return 0 if not probs else 4
+    ctx = _open(write=not args.prova)
+    files = sorted(sb.to_send_dir(ctx.home).glob("*.json")) if sb.to_send_dir(ctx.home).is_dir() else []
+    out: dict = {"contratto": sb.CONTRACT}
+    if args.prova:
+        out |= {"modo": "prova", "file_da_inviare": len(files), "lettere_da_classificare": len(sb.letters_to_classify(ctx.conn)),
+                "stato": sb.status(ctx.conn)}
+        _print({**out, **_finish(ctx, wrote=False)})
+        return 0
+    todo = sb.letters_to_classify(ctx.conn)
+    if files or todo:
+        entry = backups.make_backup(ctx.conn, ctx.state, reason="before_feedback")
+        out["backup_prima_della_scrittura"] = str(ctx.state.backup_dir / entry["file"])
+    if files:
+        out["invio"] = sb.submit(ctx.conn, ctx.home)
+    out["pacchetti"] = sb.issue_packets(ctx.conn, ctx.home, project_name=ctx.project.name,
+                                        project_version=ctx.project.version)
+    out |= {"cartella_pacchetti": str(sb.packets_dir(ctx.home)), "cartella_da_inviare": str(sb.to_send_dir(ctx.home)),
+            "stato": sb.status(ctx.conn)}
+    _print({**out, **_finish(ctx, wrote=bool(files or out["pacchetti"]["esecuzioni_nuove"]))})
+    return 0
+
+
+def cmd_methods_check(args) -> int:
+    """metodi-controllo (T-057): the hand-check sample (CSV) or, from the filled copy, precision and S/N recorded."""
+    ctx = _open(write=True)
+    out = stats_terms.check_cycle(ctx.conn, ctx.home)
+    _print({**out, **_finish(ctx, wrote=bool(out.get("giudizi_scritti")))})
+    return 0
+
+
+def _sigla_by_journal_id(ctx) -> dict[str, str]:
+    listed, _problems = layout.read_journal_list(ctx.home / ctx.project.storage.journals_csv)
+    return {sg.lower(): jid for sg, jid in policy_versions.journal_by_sigla(ctx.conn, listed).items()}
 
 
 def cmd_segments(args) -> int:
@@ -2165,6 +2325,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--prova", action="store_true", help="no network, write nothing: what would be read and asked")
     p.add_argument("--senza-openalex", action="store_true", help="only the SCImago file, no network")
     p.set_defaults(func=cmd_journal_metrics)
+    p = sub.add_parser("metodi")
+    p.add_argument("--prova", action="store_true", help="show what would be written, write nothing")
+    p.set_defaults(func=cmd_methods)
+    p = sub.add_parser("profilo-rivista")
+    p.add_argument("sigla", nargs="?", help="sigla of the journal (all journals when omitted)")
+    p.add_argument("--voce", help="term of the dictionary: the sentences behind its count")
+    p.set_defaults(func=cmd_journal_profile)
+    p = sub.add_parser("obiettivi")
+    p.add_argument("--pacchetti", type=int, default=10, help="open packets wanted after the run (default 10)")
+    p.add_argument("--rivista", help="sigla of the journal of riviste_prioritarie.csv: packets only for its articles "
+                                     "(up to --pacchetti open of that journal; the other open packets stay)")
+    p.add_argument("--controlla", nargs=2, metavar=("SCHEDA", "PACCHETTO"),
+                   help="check one card against its packet, nothing written (for Claude)")
+    p.add_argument("--prova", action="store_true", help="what would be sent and issued; nothing written")
+    p.set_defaults(func=cmd_objectives)
+    p = sub.add_parser("riscontri")
+    p.add_argument("--controlla", nargs=2, metavar=("FILE", "PACCHETTO"),
+                   help="check one classification against its packet, nothing written (for Claude)")
+    p.add_argument("--prova", action="store_true", help="what would be sent and issued; nothing written")
+    p.set_defaults(func=cmd_feedback)
+    p = sub.add_parser("metodi-controllo")
+    p.set_defaults(func=cmd_methods_check)
     p = sub.add_parser("segmenta")
     p.add_argument("--prova", action="store_true", help="show what would be written, write nothing")
     p.set_defaults(func=cmd_segments)

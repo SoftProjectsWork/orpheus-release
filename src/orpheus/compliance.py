@@ -41,7 +41,8 @@ OUTCOMES = {"ko": "da correggere", "guarda": "da guardare", "ok": "conforme", "n
 ORDER = ("ko", "guarda", "ok", "na")
 GROUPS = ("Il file", "Lunghezza", "Abstract e parole chiave", "Struttura del testo", "Figure e tabelle",
           "Riferimenti e citazioni", "Numeri e statistiche", "Checklist di reporting", "Revisione sistematica",
-          "Dichiarazioni", "Formato della pagina", "Altre regole della rivista")
+          "Dichiarazioni", "Formato della pagina", "Altre regole della rivista",
+          "Confronto con gli articoli della rivista")
 REPORTS = "manoscritti"
 CORE_SECTIONS = ("introduction", "methods", "results", "discussion")
 
@@ -66,7 +67,9 @@ class Rule:
     number: float | None
     unit: str | None
     page: int | None
-    origin: str
+    origin: str                    # reported / interpreted / not_available (from the PDF) or manual (T-052)
+    source: str | None = None      # manual: where the user read it
+    read_on: str | None = None     # manual: date read
 
 
 @dataclass
@@ -74,7 +77,7 @@ class JournalRules:
     journal_id: str
     title: str
     sigla: str | None
-    card_id: str
+    card_id: str | None            # None: values only by hand (journal without guideline PDF, T-052)
     card_date: str
     guidelines_date: str | None
     type_name: str | None          # the article type of the card used (e.g. 'Original Research')
@@ -88,20 +91,27 @@ class JournalRules:
         out = {"rivista": self.sigla or self.title, "scheda": self.card_date[:10], "linee_guida": self.guidelines_date}
         if r is not None:
             out.update({"campo": r.field, "tipo": r.article_type, "pagina": r.page})
+            if r.origin == "manual":
+                out.update({"a_mano": True, "fonte_a_mano": r.source, "letto_il": r.read_on})
         return out
 
 
 # ----------------------------------------------------------------------------------------------------- the rules
 def journals_with_cards(conn: sqlite3.Connection, journal_list: list[dict] | None = None) -> list[dict]:
+    """Journals with rules: a current card from the guideline PDF and/or values written by hand (T-052)."""
     sigla_of = {jid: sg for sg, jid in policy_versions.journal_by_sigla(conn, journal_list or []).items()}
     exact = {r["sigla"].lower(): r["sigla"] for r in journal_list or [] if r.get("sigla")}
     out = []
-    for r in conn.execute("""SELECT j.id, j.title, c.id AS card_id, c.created_at FROM journal_card c
-                             JOIN journal j ON j.id = c.journal_id WHERE c.status = 'current' ORDER BY j.title"""):
-        sg = sigla_of.get(r["id"])
-        out.append({"id": r["id"], "titolo": r["title"], "sigla": exact.get(sg, sg.upper()) if sg else None,
-                    "scheda": r["card_id"], "data_scheda": r["created_at"]})
-    return out
+    for jid in journal_cards.journals_with_rules(conn):
+        j = conn.execute("SELECT id, title FROM journal WHERE id = ?", (jid,)).fetchone()
+        card = journal_cards.current_card(conn, jid)
+        manual = journal_cards.manual_values(conn, jid)
+        dates = ([card["created_at"]] if card else []) + [m["created_at"] for m in manual]
+        sg = sigla_of.get(jid)
+        out.append({"id": jid, "titolo": j["title"], "sigla": exact.get(sg, sg.upper()) if sg else None,
+                    "scheda": card["id"] if card else None, "data_scheda": max(dates) if dates else "",
+                    "valori_a_mano": len(manual), "solo_a_mano": card is None})
+    return sorted(out, key=lambda x: (x["titolo"] or "").lower())
 
 
 def pick_journals(conn, journal_list: list[dict], wanted: list[str] | None) -> tuple[list[dict], list[str]]:
@@ -121,13 +131,14 @@ def pick_journals(conn, journal_list: list[dict], wanted: list[str] | None) -> t
 
 def load_rules(conn: sqlite3.Connection, journal: dict, kind: str) -> JournalRules:
     card = conn.execute("SELECT id, policy_version_id, created_at FROM journal_card WHERE id = ?",
-                        (journal["scheda"],)).fetchone()
+                        (journal["scheda"],)).fetchone() if journal.get("scheda") else None
     pv = conn.execute("SELECT detected_at, summary FROM journal_policy_version WHERE id = ?",
-                      (card["policy_version_id"],)).fetchone()
+                      (card["policy_version_id"],)).fetchone() if card else None
     printed = re.search(r"stampata dal browser il (\d{4}-\d{2}-\d{2})", (pv["summary"] or "") if pv else "")
     gdate = printed.group(1) if printed else ((pv["detected_at"] or "")[:10] if pv else None)
-    vals = [Rule(v["field"], v["article_type"], v["value"], v["number"], v["unit"], v["page_no"], v["origin"])
-            for v in conn.execute("SELECT * FROM journal_card_value WHERE card_id = ? ORDER BY ord", (card["id"],))]
+    vals = [Rule(v["field"], v["article_type"], v["value"], v["number"], v["unit"], v["page_no"], v["origin"],
+                 v.get("source"), v.get("read_on"))
+            for v in journal_cards.effective_values(conn, journal["id"])]
     types = [v for v in vals if v.field == "tipo_articolo"]
     chosen = next((v for v in types if KIND_PATTERNS[kind].search(v.article_type or "")), None)
     tname = chosen.article_type if chosen else None
@@ -145,7 +156,8 @@ def load_rules(conn: sqlite3.Connection, journal: dict, kind: str) -> JournalRul
             rules[f + "__generale"] = general if usable else []
     for f in journal_cards.JOURNAL_FIELDS:
         rules[f] = [v for v in vals if v.field == f]
-    return JournalRules(journal["id"], journal["titolo"], journal["sigla"], card["id"], card["created_at"], gdate,
+    return JournalRules(journal["id"], journal["titolo"], journal["sigla"], card["id"] if card else None,
+                        journal.get("data_scheda") or (card["created_at"] if card else ""), gdate,
                         tname, chosen.value if chosen else None, rules)
 
 
@@ -1013,7 +1025,17 @@ def check(m: Manuscript, jr: JournalRules, kind: str, conn: sqlite3.Connection |
     if kind == "revisione":                   # T-051b (EURYDIKE E1): flow, abstract, table, k/n, I², registration
         from .eurydike.review_audit import audit as review_audit
         run.out += review_audit(m, path)
+    if conn is not None and _has_table(conn, "text_structure"):    # T-057: vs the journal's published articles
+        from .journal_profile import compare
+        run.out += compare(conn, m, jr)
+    if conn is not None and _has_table(conn, "comment_label"):    # T-056: lessons from the user's own submissions
+        from .submissions import compare as lessons_compare
+        run.out += lessons_compare(conn, jr)
     return _merge(run.out)
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)).fetchone() is not None
 
 
 def counts(checks: list[Check]) -> dict[str, int]:

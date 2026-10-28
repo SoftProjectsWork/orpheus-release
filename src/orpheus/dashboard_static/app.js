@@ -708,16 +708,238 @@ sections.riviste = async () => {
   renderTables();
   put(view, ...head("Riviste", "Le riviste dell'elenco: metriche ufficiali con anno e fornitore, linee guida (data più recente) e regole per gli autori lette dalle schede. Scegli quali mettere a confronto.",
     refreshButton(() => { clearCache(); route(); })), await actionBlock("aggiorna_riviste"), await journalListBlock(),
+    journalCardBlock(d.riviste),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Riviste da confrontare"),
       h("span", {class: "muted"}, "la scelta resta salvata in questo browser")), pickHolder),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Metriche e linee guida")), holder,
       srcLine(d.metriche, "SJR e quartile: SCImago 2025. h-index: prima SCImago, poi OpenAlex.")),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Regole per gli autori a confronto"),
       h("span", {class: "muted"}, "primo tipo di articolo di ogni scheda")), confHolder, srcLine(d.confronto)),
+    await journalProfileBlock(),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Avvisi sulle linee guida")),
       d.avvisi.righe.length ? h("ul", {class: "notes"}, d.avvisi.righe.map((a) => h("li", null, tag("da rifare", "warn"), a)))
         : h("p", {class: "empty"}, "Nessun avviso: le schede delle riviste sono sulle linee guida più recenti."), srcLine(d.avvisi)));
 };
+/* T-052: the card of a journal — values from the guideline PDF (page) and values written by hand (source and date,
+   migration 0019). Correcting = a new row, the old one stays in the history; "Togli" goes back to the PDF value. */
+const JCARD_KEY = "orpheus-scheda-rivista";
+function journalCardBlock(riviste) {
+  const box = h("section", {class: "block", "aria-labelledby": "h-jcard"});
+  const title = h("div", {class: "block-head"}, h("h2", {id: "h-jcard"}, "Scheda della rivista: correggi o aggiungi a mano"),
+    h("span", {class: "muted"}, "anche per le riviste senza PDF delle linee guida"));
+  const rows = riviste.filter((r) => r.id).sort((a, b) => String(a.sigla || a.titolo).localeCompare(String(b.sigla || b.titolo)));
+  if (!rows.length) return put(box, title, h("p", {class: "empty"}, "Nessuna rivista nel database."));
+  let pick = null;
+  try { pick = localStorage.getItem(JCARD_KEY); } catch (e) { /* storage not available */ }
+  if (!rows.some((r) => r.id === pick)) pick = rows[0].id;
+  const holder = h("div"), formBox = h("div");
+  const msg = h("p", {class: "muted", role: "status"});
+  const sel = h("select", {"aria-label": t("Rivista"), onchange: (e) => {
+    pick = e.target.value; try { localStorage.setItem(JCARD_KEY, pick); } catch (err) { /* ignore */ } load(); }},
+    rows.map((r) => h("option", {value: r.id, selected: r.id === pick ? true : null}, r.sigla ? `${r.sigla} — ${r.titolo}` : r.titolo)));
+  const today = () => { const n = new Date(); return new Date(n.getTime() - n.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  const origin = (v) => v.origin === "manual" ? [tag(t("a mano"), "acc"), " ", h("span", {class: "t-sub"}, `${v.source} · ${t("letto il")} ${v.read_on}`)]
+    : v.manual_id ? [tag(t("a mano"), "acc"), " ", h("span", {class: "t-sub"}, `${t("non indicato dalla rivista")} · ${v.source} · ${v.read_on}`)]
+    : v.origin === "not_available" ? h("span", {class: "t-sub"}, t("non indicato nelle linee guida"))
+    : [tag(v.origin === "interpreted" ? t("PDF, dedotto") : "PDF", "good"), " ", h("span", {class: "t-sub"}, `p. ${v.page_no}`)];
+  let cur = null;
+  const openForm = (v) => {
+    const f = {};
+    const field = h("select", {name: "campo"}, cur.campi.map((c) => h("option", {value: c.campo,
+      selected: v && v.field === c.campo ? true : null}, `${c.campo} — ${t(c.descrizione)}`)));
+    f.campo = field;
+    const types = [...new Set([cur.tutti_i_tipi, ...cur.valori.filter((x) => x.field === "tipo_articolo").map((x) => x.article_type)].filter(Boolean))];
+    const list = h("datalist", {id: "jcard-types"}, types.map((x) => h("option", {value: x})));
+    f.tipo = h("input", {type: "text", name: "tipo", list: "jcard-types", value: v ? v.article_type || "" : ""});
+    f.valore = h("input", {type: "text", name: "valore", value: v && v.value ? v.value : ""});
+    f.unita = h("input", {type: "text", name: "unita", value: v && v.unit ? v.unit : "", placeholder: t("es. parole")});
+    f.fonte = h("input", {type: "text", name: "fonte", required: true, value: v && v.source ? v.source : "",
+      placeholder: t("indirizzo della pagina, PDF e pagina, oppure una nota")});
+    f.letto = h("input", {type: "date", name: "letto", required: true, value: today()});
+    f.nota = h("input", {type: "text", name: "nota", value: ""});
+    const na = h("input", {type: "checkbox", name: "na"});
+    const item = v && v.item ? v.item : 1;
+    const isType = () => (cur.campi.find((c) => c.campo === field.value) || {}).per_tipo;
+    const typeRow = h("label", {class: "fld"}, h("span", null, t("Tipo di articolo")), f.tipo, list);
+    const sync = () => { typeRow.hidden = !isType(); f.valore.disabled = na.checked; };
+    field.addEventListener("change", sync); na.addEventListener("change", sync);
+    const out = h("p", {class: "muted", role: "status"});
+    const form = h("form", {class: "jform", onsubmit: async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector("button[type=submit]");
+      btn.disabled = true; out.textContent = t("Salvo…");
+      try {
+        await postJson("/api/riviste/scheda/valore", {journal_id: cur.journal_id, campo: field.value,
+          tipo: isType() ? f.tipo.value.trim() : null, item, valore: f.valore.value.trim(), unita: f.unita.value.trim(),
+          fonte: f.fonte.value.trim(), letto_il: f.letto.value, nota: f.nota.value.trim(), non_indicato: na.checked});
+        clearCache();
+        msg.textContent = t("Valore salvato: ORPHEUS lo usa al posto di quello del PDF nei controlli dei manoscritti.");
+        formBox.replaceChildren(); load();
+      } catch (err) { out.textContent = err.message; btn.disabled = false; }
+    }},
+      h("h3", null, v ? `${t("Correggi")} ${v.field}${v.article_type ? ` (${v.article_type})` : ""}` : t("Aggiungi un valore")),
+      h("div", {class: "form-grid"},
+        h("label", {class: "fld"}, h("span", null, t("Campo")), field), typeRow,
+        h("label", {class: "fld"}, h("span", null, t("Valore")), f.valore),
+        h("label", {class: "fld"}, h("span", null, t("Unità")), f.unita),
+        h("label", {class: "fld"}, h("span", null, t("Fonte")), f.fonte),
+        h("label", {class: "fld"}, h("span", null, t("Letto il")), f.letto),
+        h("label", {class: "fld"}, h("span", null, t("Nota")), f.nota),
+        h("label", {class: "fld check"}, na, h("span", null, t("La rivista non lo indica")))),
+      h("div", {class: "action-row"}, h("button", {type: "submit", class: "btn primary"}, "Salva"), " ",
+        h("button", {type: "button", class: "btn", onclick: () => formBox.replaceChildren()}, "Annulla")),
+      out,
+      h("p", {class: "src"}, t("Salva = una riga nuova nel database (journal_card_manual, con fonte e data); il valore del PDF resta nella scheda e torna in uso se togli quello a mano. Copia di sicurezza automatica come per gli altri comandi.")));
+    sync();
+    put(formBox, form);
+    setTimeout(() => (v ? f.valore : field).focus(), 0);
+  };
+  const withdraw = async (v) => {
+    if (!confirm(t("Togliere questo valore scritto a mano? Resta nella storia; torna in uso il valore del PDF, se c'è."))) return;
+    try { await postJson("/api/riviste/scheda/togli", {id: v.manual_id}); clearCache(); msg.textContent = t("Valore tolto."); load(); }
+    catch (err) { msg.textContent = err.message; }
+  };
+  const load = async () => {
+    put(holder, h("p", {class: "muted"}, t("Lettura della scheda…")));
+    try { cur = await get(`/api/riviste/scheda?id=${encodeURIComponent(pick)}`, true); } catch (e) { put(holder, errorBox(e)); return; }
+    const sc = cur.scheda;
+    const hist = cur.storia.filter((x) => x.status !== "current");
+    put(holder,
+      h("p", null, sc ? `${t("Scheda dal PDF delle linee guida del")} ${fmtDate(sc.data, false)} (${sc.versione}).`
+        : t("Nessuna scheda dal PDF delle linee guida: i valori qui sotto sono solo quelli scritti a mano.")),
+      h("div", {class: "action-row"}, h("button", {type: "button", class: "btn primary", onclick: () => openForm(null)}, t("Aggiungi un valore"))),
+      formBox,
+      cur.valori.length ? h("div", {class: "table-wrap"}, h("table", null,
+        h("thead", null, h("tr", null, ["Campo", "Tipo di articolo", "Valore", "Da dove", ""].map((c) => h("th", {scope: "col"}, t(c))))),
+        h("tbody", null, cur.valori.map((v) => h("tr", null,
+          h("th", {scope: "row"}, v.field), h("td", null, v.article_type || "—"),
+          h("td", null, v.value || "—", v.unit ? ` ${v.unit}` : ""), h("td", null, origin(v)),
+          h("td", null, h("button", {type: "button", class: "btn small", onclick: () => openForm(v)}, t("Correggi")),
+            v.manual_id ? [" ", h("button", {type: "button", class: "btn small", onclick: () => withdraw(v)}, t("Togli"))] : null))))))
+        : h("p", {class: "empty"}, t("Scheda vuota: aggiungi i valori a mano o scrivi la scheda dal PDF delle linee guida.")),
+      hist.length ? h("details", null, h("summary", null, `${t("Storia dei valori a mano")} (${hist.length})`),
+        h("ul", {class: "notes"}, hist.map((x) => h("li", null, tag(x.status === "withdrawn" ? t("tolto") : t("sostituito")), " ",
+          `${x.field}${x.article_type ? ` (${x.article_type})` : ""}: ${x.action === "set" ? x.value : t("non indicato")} · ${x.source} · ${x.read_on} · ${fmtDate(x.created_at)}`)))) : null,
+      msg);
+  };
+  load();
+  return put(box, title, h("div", {class: "filters"}, h("label", {class: "field"}, t("Rivista"), sel)), holder);
+}
+/* T-057: profile of a journal from its published articles (stats-terms-v1): what they report about statistics,
+   transparency and structure; always N and the fixed warning; a count opens the sentences behind it. */
+const PROF_KEY = "orpheus-profilo-rivista";
+const PROF_YEAR_TERMS = [["effect_size", "Effect size"], ["ci", "IC"], ["power_analysis", "Potenza"],
+  ["mixed_model", "Modelli misti"], ["registration", "Registrazione"], ["data_availability", "Dati disponibili"]];
+async function journalProfileBlock() {
+  const box = h("section", {class: "block", "aria-labelledby": "h-jprof"});
+  let d;
+  try { d = await get("/api/riviste/profilo"); } catch (e) { return h("section", {class: "block"}, errorBox(e)); }
+  const title = h("div", {class: "block-head"}, h("h2", {id: "h-jprof"}, "Profilo della rivista dagli articoli pubblicati"),
+    h("span", {class: "muted"}, "metodi statistici, trasparenza e struttura"));
+  const rows = d.riviste.filter((r) => r.sigla);
+  if (!rows.length) {
+    return put(box, title, h("p", {class: "empty"}, "Nessun articolo analizzato: premi «Aggiungi e verifica gli articoli nuovi» (passo «metodi») o lancia lavora."),
+      srcLine(d));
+  }
+  let pick = null;
+  try { pick = localStorage.getItem(PROF_KEY); } catch (e) { /* storage not available */ }
+  if (!rows.some((r) => r.sigla === pick)) pick = rows[0].sigla;
+  const sel = h("select", {"aria-label": t("Rivista"), onchange: (e) => {
+    pick = e.target.value; try { localStorage.setItem(PROF_KEY, pick); } catch (err) { /* ignore */ } render(); }},
+    rows.map((r) => h("option", {value: r.sigla, selected: r.sigla === pick ? true : null}, `${r.sigla} (N = ${fmtN(r.articoli)})`)));
+  const holder = h("div");
+  const prec = d.precisione && d.precisione.complessiva;
+  const precLine = prec && prec.precisione != null
+    ? `${t("Precisione delle regole dal controllo a mano")}: ${fmtN(prec.precisione)} (${fmtN(prec.giusti)} ${t("giuste")}, ${fmtN(prec.sbagliati)} ${t("sbagliate")}).`
+    : t("Precisione delle regole non ancora misurata: controllo a mano con il comando metodi-controllo.");
+  const sentences = async (r, voce, nome, into) => {
+    put(into, h("p", {class: "muted"}, t("Lettura delle frasi…")));
+    try {
+      const x = await get(`/api/riviste/profilo/frasi?rivista=${encodeURIComponent(r.sigla)}&voce=${encodeURIComponent(voce)}`);
+      put(into, h("ul", {class: "notes"}, x.frasi.map((f) => h("li", null,
+        h("b", null, `${f.anno || "—"} · p. ${f.pagina}${f.sezione ? ` · ${f.sezione}` : ""}${f.dettaglio ? ` · ${f.dettaglio}` : ""}`), " ",
+        h("span", {lang: "en"}, f.frase), " ", h("span", {class: "t-sub"}, f.title || "")))));
+    } catch (e) { put(into, errorBox(e)); }
+  };
+  const render = () => {
+    const r = rows.find((x) => x.sigla === pick);
+    const years = r.per_anno.map((y) => y.anno).filter((y) => y != null);
+    const groups = r.gruppi.map((g) => {
+      const found = g.voci.filter((v) => v.articoli > 0), none = g.voci.filter((v) => !v.articoli);
+      return h("div", {class: "prof-group"}, h("h3", null, t(g.nome)),
+        found.length ? h("div", {class: "hbars prof-bars"}, found.flatMap((v) => {
+          const more = h("div", {class: "prof-sent"});
+          const btn = h("button", {type: "button", class: "linklike", "aria-expanded": "false", onclick: () => {
+            const open = btn.getAttribute("aria-expanded") === "true";
+            btn.setAttribute("aria-expanded", String(!open));
+            if (open) put(more); else sentences(r, v.voce, v.nome, more);
+          }}, t(v.nome));
+          const det = Object.entries(v.dettagli || {}).map(([k, n]) => `${k} ${n}`).join(", ");
+          return [btn,
+            h("span", {class: "track", "aria-hidden": "true"}, h("i", {style: `width:${v.percentuale || 0}%`})),
+            h("span", {class: "num"}, `${fmtN(v.articoli)}/${fmtN(r.articoli)} (${fmtN(v.percentuale)}%)`
+              + (v.dichiarato_non_fatto ? ` · ${t("dichiarato non fatto")}: ${fmtN(v.dichiarato_non_fatto)}` : "")),
+            det ? h("span", {class: "prof-det t-sub"}, det) : null, more].filter(Boolean);
+        })) : null,
+        none.length ? h("p", {class: "t-sub"}, `${t("Mai trovate")}: ${none.map((v) => t(v.nome)).join(", ")}`) : null);
+    });
+    const st = Object.entries(r.struttura).filter(([, v]) => v.n);
+    const structure = st.length ? h("div", {class: "table-wrap"}, h("table", null,
+      h("thead", null, h("tr", null, ["Misura", "Mediana", "Q1–Q3", "Min–max", "N"].map((c) => h("th", {scope: "col"}, t(c))))),
+      h("tbody", null, st.map(([, v]) => h("tr", null, h("th", {scope: "row"}, t(v.nome)), h("td", {class: "num"}, fmtN(v.mediana)),
+        h("td", {class: "num"}, v.q1 != null ? `${fmtN(v.q1)}–${fmtN(v.q3)}` : "—"),
+        h("td", {class: "num"}, `${fmtN(v.min)}–${fmtN(v.max)}`), h("td", {class: "num"}, fmtN(v.n)))))))
+      : h("p", {class: "empty"}, "Struttura non misurabile per questi articoli.");
+    const perYear = r.per_anno.length > 1 ? h("div", {class: "table-wrap"}, h("table", null,
+      h("thead", null, h("tr", null, h("th", {scope: "col"}, t("Anno")), h("th", {scope: "col"}, "N"),
+        PROF_YEAR_TERMS.map(([, label]) => h("th", {scope: "col"}, t(label))))),
+      h("tbody", null, r.per_anno.map((y) => h("tr", null, h("th", {scope: "row"}, y.anno == null ? "—" : String(y.anno)),
+        h("td", {class: "num"}, fmtN(y.articoli)),
+        PROF_YEAR_TERMS.map(([k]) => h("td", {class: "num"}, y.voci[k] ? `${fmtN(y.voci[k])} (${Math.round(100 * y.voci[k] / y.articoli)}%)` : "0"))))))) : null;
+    put(holder,
+      h("p", {class: "warnline", role: "note"}, tag("attenzione", "warn"), " ", t(d.avviso)),
+      h("p", null, h("b", null, `${r.sigla} — ${r.titolo || ""}`), ` · ${t("articoli analizzati")}: ${fmtN(r.articoli)}`
+        + (years.length ? ` (${Math.min(...years)}–${Math.max(...years)})` : "")
+        + ` · ${t("con almeno un metodo statistico trovato")}: ${fmtN(r.articoli_con_metodi_statistici)}`),
+      h("p", {class: "t-sub"}, t("Ogni conteggio è il numero di articoli in cui la voce è scritta (una volta per articolo); premi una voce per leggere le frasi con la pagina.")),
+      h("div", {class: "prof-groups"}, groups),
+      h("h3", null, t("Struttura (parole, figure, tabelle, riferimenti)")), structure,
+      perYear ? [h("h3", null, t("Per anno")), perYear] : null,
+      h("h3", null, t("Test per obiettivo e disegno")), objectiveTable(r.test_per_obiettivo),
+      h("h3", null, t("Frasi utili come modello di scrittura")), writingModels(r.frasi_modello),
+      h("p", {class: "t-sub"}, precLine));
+  };
+  render();
+  return put(box, title, h("div", {class: "filters"}, h("label", {class: "field"}, t("Rivista"), sel)), holder,
+    srcLine(d, `${t("Articoli analizzati in tutto")}: ${fmtN(d.articoli_analizzati)}.`));
+}
+function objectiveTable(o) {
+  // T-057c: statistics read by objective and design (cards-v2, obiettivi-v1), always with N
+  if (!o || !o.combinazioni || !o.combinazioni.length) {
+    return h("p", {class: "empty"}, t("Nessun articolo con obiettivo e disegno nella scheda: lancia obiettivi.cmd e chiedi a Claude le schede."));
+  }
+  return [h("p", {class: "t-sub"}, t(o.nota)),
+    h("div", {class: "table-wrap"}, h("table", null,
+      h("thead", null, h("tr", null, ["Obiettivo e disegno", "N", "Confermati da te", "Analisi principale (dalle schede)", "Test e modelli (articoli)"].map((c) => h("th", {scope: "col"}, t(c))))),
+      h("tbody", null, o.combinazioni.map((c) => h("tr", null, h("th", {scope: "row"}, t(c.disegno)),
+        h("td", {class: "num"}, fmtN(c.articoli)), h("td", {class: "num"}, fmtN(c.confermati)),
+        h("td", {lang: "en"}, (c.analisi_principali || []).length ? c.analisi_principali.map((x) => `${x.analisi} (${fmtN(x.articoli)})`).join("; ") : "—"),
+        h("td", null, c.test.length ? c.test.map((x) => `${t(x.nome)} ${fmtN(x.articoli)}/${fmtN(c.articoli)}`).join(", ") : "—"))))))];
+}
+function writingModels(m) {
+  // point 5 (2026-10-28): short sentences already checked in the cards, with the reference — structure, not text to copy
+  if (!m || !m.campi.some((c) => c.frasi.length)) {
+    return h("p", {class: "empty"}, t("Nessuna frase breve nelle schede di questa rivista: arriveranno con le schede di obiettivo e disegno."));
+  }
+  return [h("p", {class: "t-sub"}, t(m.nota)), ...m.campi.filter((c) => c.frasi.length).map((c) => h("details", {class: "models"},
+    h("summary", null, `${t(c.nome)} (${fmtN(c.frasi_brevi)})`),
+    c.aperture.length ? h("p", {class: "t-sub"}, `${t("Aperture più frequenti")}: `,
+      c.aperture.map((a, i) => [i ? "; " : "", h("span", {lang: "en"}, `«${a.inizio}…»`), ` ${fmtN(a.articoli)}`])) : null,
+    h("ul", {class: "notes"}, c.frasi.map((f) => h("li", null, h("span", {lang: "en"}, f.frase), " ",
+      h("span", {class: "t-sub"}, `— ${f.titolo || ""}${f.anno ? `, ${f.anno}` : ""}, p. ${f.pagina}`
+        + (f.tipo_obiettivo ? ` · ${t(f.tipo_obiettivo)}` : "")), " ", f.confermata ? tag(t("confermata"), "good") : tag(t("proposta"))))))
+  )];
+}
 function latestGuide(r) {
   return (r.linee_guida || []).reduce((best, x) => (!best || String(x.data || "") > String(best.data || "")) ? x : best, null);
 }
@@ -990,6 +1212,148 @@ sections.manoscritti = async () => {
       h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "2. Riviste")), pickBox,
         h("h3", null, "3. Tipo di articolo"), kindBox, srcLine(d))),
     h("section", {class: "block"}, resultBox), prep);
+};
+/* small icon buttons (pencil = edit, trash = remove): label for screen readers and tooltip */
+const ICONS = {
+  matita: ["M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4", "M13.5 6.5l4 4"],
+  cestino: ["M4 7h16", "M10 11v6", "M14 11v6", "M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12", "M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"],
+};
+function iconBtn(kind, label, onclick) {
+  return h("button", {type: "button", class: "btn small icon-btn", title: t(label), "aria-label": t(label), onclick},
+    s("svg", {viewBox: "0 0 24 24", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "2",
+      "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false"},
+      ICONS[kind].map((d) => s("path", {d}))));
+}
+/* T-056: diario delle sottomissioni e lezioni dai revisori (R10: tutto resta su questo PC) */
+sections.sottomissioni = async () => {
+  const d = await get("/api/sottomissioni", true);
+  const reload = () => { clearCache(); route(); };
+  const opt = (pairs, value) => pairs.map(([v, l]) => h("option", {value: v, selected: v === value ? true : null}, t(l)));
+  const subs = d.lavori.flatMap((m) => m.sottomissioni.map((x) => ({...x, lavoro: m.label})));
+  const send = async (path, body, errBox) => {
+    try { await postJson(`/api/sottomissioni/${path}`, body); reload(); }
+    catch (err) { if (errBox) { errBox.hidden = false; errBox.textContent = err.message; } else alert(err.message); }
+  };
+  const form = (title, fields, path, button, after) => {
+    const f = {};
+    const msg = h("p", {class: "error", role: "alert", hidden: true});
+    const el = h("form", {class: "block", onsubmit: (e) => {
+      e.preventDefault();
+      const body = {};
+      for (const [k, x] of Object.entries(f)) body[k] = x.value;
+      msg.hidden = true;
+      send(path, body, msg);
+    }}, h("h2", null, t(title)),
+      h("div", {class: "form-grid"}, fields.map(([k, label, input]) => field(t(label), (f[k] = input)))),
+      after ? after(f) : null, msg, h("div", {class: "action-row"}, h("button", {type: "submit", class: "btn primary"}, t(button))));
+    return el;
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  const inp = (attrs) => h("input", {type: "text", ...(attrs || {})});
+  const sel = (pairs, value) => h("select", null, opt(pairs, value));
+  const subPairs = subs.map((x) => [x.id, `${x.lavoro} → ${x.journal_title} (${x.submitted_on})`]);
+  const forms = h("details", null, h("summary", null, t("Nuovo lavoro, nuova sottomissione, nuova decisione")),
+    h("div", {class: "cols"},
+      form("Nuovo lavoro", [["nome", "Nome del lavoro (tuo)", inp({required: true})], ["titolo", "Titolo", inp({lang: "en"})],
+        ["tipo", "Tipo", sel([["", "—"], ...d.tipi.map((k) => [k, k])], "")]], "lavoro", "Aggiungi il lavoro"),
+      form("Nuova sottomissione", [
+        ["lavoro", "Lavoro", sel(d.lavori.map((m) => [m.id, m.label]), "")],
+        ["rivista_id", "Rivista (dall'elenco; se manca: Riviste → Nuova rivista)", h("select", {required: true}, opt([["", "— scegli —"], ...d.riviste.map((r) => [r.id, r.titolo])], ""))],
+        ["data", "Data di invio", inp({type: "date", value: today, required: true})],
+        ["precedente", "Viene da (rifiuto o trasferimento)", sel([["", "—"], ...subPairs], "")]], "nuova", "Aggiungi la sottomissione")),
+    form("Aggiungi una decisione o un passo", [
+      ["sottomissione", "Sottomissione", sel(subPairs, subPairs.length ? subPairs[subPairs.length - 1][0] : "")],
+      ["evento", "Evento", sel(Object.entries(d.eventi), "revisione_maggiore")],
+      ["data", "Data", inp({type: "date", value: today, required: true})],
+      ["giro", "Giro di revisione", h("input", {type: "number", min: "1", value: "1"})],
+      ["scadenza", "Scadenza della revisione", inp({type: "date"})], ["nota", "Nota", inp()]], "evento", "Aggiungi",
+      (f) => field(t("Lettera della rivista (incollala intera: resta solo su questo PC). Le motivazioni e i commenti li aggiungi dopo, sotto la lettera."), (f.lettera = h("textarea", {rows: "8", lang: "en"})))));
+  const s = d.stato;
+  const kpi = (v, l) => h("div", {class: "kpi static", role: "group"}, h("div", {class: "kpi-v"}, fmtN(v)), h("div", {class: "kpi-l"}, t(l)));
+  const labelBox = (c) => {
+    const e = c.etichetta;
+    const box = h("div", {class: "t-sub"});
+    const cat = h("select", {"aria-label": t("Categoria")}, opt(Object.entries(d.categorie), e ? e.category : "altro"));
+    const sev = h("select", {"aria-label": t("Gravità")}, opt(Object.entries(d.gravita), e ? e.severity : "importante"));
+    const fol = h("select", {"aria-label": t("Seguito")}, opt([["", "—"], ...Object.entries(d.seguito)], e ? (e.followed || "") : ""));
+    const save = () => send("etichetta", {commento: c.id, categoria: cat.value, gravita: sev.value, seguito: fol.value});
+    const fr = c.seguito_dalla_risposta;
+    const hint = fr && (!e || e.followed !== fr.seguito) ? h("span", {class: "t-sub"}, " ",
+      tag(t("dalla risposta ai revisori"), "acc"), ` ${t(fr.azione)} → ${t("seguito")}: ${t(d.seguito[fr.seguito])} `,
+      h("button", {type: "button", class: "btn small", onclick: () => { fol.value = fr.seguito; if (e) save(); }}, t("Usa"))) : null;
+    put(box, e ? tag(e.state === "ai" ? t("proposta di Claude") : e.state === "confirmed" ? t("confermata") : t("corretta"), e.state === "ai" ? "warn" : "ok") : tag(t("da classificare"), "warn"),
+      " ", cat, " ", sev, " ", fol, " ", h("button", {type: "button", class: "btn small", onclick: save}, e && e.state === "ai" ? t("Conferma o correggi") : t("Salva")), hint);
+    return box;
+  };
+  const commentsBox = (l) => {
+    const chi = h("select", {"aria-label": t("Chi")}, opt(Object.entries(d.chi), "ED"));
+    const txt = h("textarea", {rows: "3", lang: "en", "aria-label": t("Motivazione o commento")});
+    const msg = h("p", {class: "error", role: "alert", hidden: true});
+    const list = l.commenti.length ? h("ul", {class: "plain"}, l.commenti.map((c) => h("li", null,
+      h("b", null, `${d.chi[c.reviewer] || c.reviewer} (${c.comment_key})`), " ",
+      c.nella_lettera ? tag(t("nella lettera"), "ok") : tag(t("non trovato nella lettera"), "warn"), " ",
+      h("span", {lang: "en"}, c.text), labelBox(c),
+      iconBtn("cestino", "Togli questo commento", () => { if (confirm(t("Togliere questo commento?"))) send("togli_commento", {commento: c.id}); }))))
+      : l.no_comments ? h("p", {class: "notice"}, t("La rivista non ha fatto commenti."), " ",
+        h("button", {type: "button", class: "btn small", onclick: () => send("nessun_commento", {lettera: l.id, valore: false})}, t("Annulla")))
+      : h("p", {class: "empty"}, t("Nessuna motivazione o commento: aggiungili con + oppure segna – se la rivista non ne ha fatti."));
+    return h("div", null, h("h4", null, t("Motivazioni e commenti")), list,
+      l.no_comments ? null : h("div", {class: "form-grid"}, field(t("Chi"), chi), field(t("Motivazione o commento (incolla solo la parte che conta)"), txt)),
+      msg,
+      l.no_comments ? null : h("div", {class: "action-row"},
+        h("button", {type: "button", class: "btn primary", title: t("Aggiungi una motivazione o un commento"), onclick: () => { msg.hidden = true; send("commento", {lettera: l.id, chi: chi.value, testo: txt.value}, msg); }}, "+ ", t("Aggiungi")), " ",
+        l.commenti.length ? null : h("button", {type: "button", class: "btn", title: t("La rivista non ha fatto commenti"), onclick: () => send("nessun_commento", {lettera: l.id, valore: true}, msg)}, "– ", t("Nessun commento"))));
+  };
+  const eventRow = (e) => {
+    const editBox = h("div", {hidden: true});
+    const ev = sel(Object.entries(d.eventi), e.event);
+    const dt = inp({type: "date", value: e.event_on});
+    const gr = h("input", {type: "number", min: "1", value: String(e.round)});
+    const due = inp({type: "date", value: e.due_on || ""});
+    const nota = inp({value: e.note || ""});
+    const msg = h("p", {class: "error", role: "alert", hidden: true});
+    put(editBox, h("div", {class: "form-grid"}, field(t("Evento"), ev), field(t("Data"), dt), field(t("Giro di revisione"), gr),
+      field(t("Scadenza della revisione"), due), field(t("Nota"), nota)), msg,
+      h("div", {class: "action-row"}, h("button", {type: "button", class: "btn primary", onclick: () => send("correggi",
+        {evento_id: e.id, evento: ev.value, data: dt.value, giro: gr.value, scadenza: due.value, nota: nota.value}, msg)}, t("Salva la modifica")), " ",
+        h("button", {type: "button", class: "btn", onclick: () => { editBox.hidden = true; }}, t("Annulla"))));
+    const sug = e.suggerimento ? h("p", {class: "warnline", role: "note"}, tag(t("suggerimento"), "warn"), " ",
+      t("La lettera sembra un rifiuto senza revisione."), " ",
+      h("button", {type: "button", class: "btn small", onclick: () => send("correggi", {evento_id: e.id, evento: e.suggerimento})}, t("Cambia in «Rifiutato senza revisione»"))) : null;
+    return h("li", null, h("div", {class: "eur-bar"},
+      h("span", null, `${e.event_on} · ${t(d.eventi[e.event] || e.event)}${e.round > 1 ? ` (${t("giro")} ${e.round})` : ""}${e.due_on ? ` · ${t("scadenza")} ${e.due_on}` : ""}${e.note ? ` · ${e.note}` : ""}`),
+      iconBtn("matita", "Modifica questo passo", () => { editBox.hidden = !editBox.hidden; }),
+      iconBtn("cestino", "Togli questo passo", () => { if (confirm(t("Togliere questo passo? Resta nella storia ma non si vede e non si conta."))) send("togli_evento", {evento_id: e.id}); })),
+      sug, editBox,
+      e.lettera ? h("details", null, h("summary", null, `${t("Lettera del")} ${e.lettera.received_on} · ${e.lettera.commenti.length} ${t("commenti")}${e.lettera.no_comments ? ` · ${t("nessun commento della rivista")}` : ""}`),
+        h("div", {class: "pre", lang: "en"}, e.lettera.text), commentsBox(e.lettera)) : null);
+  };
+  const subBlock = (x) => h("div", {class: "block"},
+    h("h3", null, `${x.journal_title}`, " ", tag(t(x.stato_testo), ["accettato"].includes(x.stato) ? "ok" : "warn")),
+    h("p", {class: "t-sub"}, [`${t("Inviato")} ${x.submitted_on}`,
+      x.giorni_alla_prima_decisione != null ? `${t("prima decisione dopo")} ${x.giorni_alla_prima_decisione} ${t("giorni")}` : null,
+      x.giorni_in_attesa != null ? `${t("in attesa da")} ${x.giorni_in_attesa} ${t("giorni")}` : null,
+      x.scadenza_revisione ? `${t("scadenza della revisione")} ${x.scadenza_revisione} (${x.giorni_alla_scadenza} ${t("giorni")})` : null].filter(Boolean).join(" · ")),
+    h("ol", {class: "notes"}, x.eventi.map(eventRow)));
+  const papers = d.lavori.length ? d.lavori.map((m) => h("section", {class: "block"},
+    h("h2", null, m.label), m.title ? h("p", {class: "t-title", lang: "en"}, m.title) : null,
+    m.sottomissioni.length ? m.sottomissioni.map(subBlock) : h("p", {class: "empty"}, t("Nessuna sottomissione."))))
+    : [h("p", {class: "empty"}, t("Nessun lavoro: aggiungi il primo con «Nuovo lavoro» (anche le sottomissioni passate)."))];
+  const les = d.lezioni;
+  const dec = (j) => Object.entries(j.decisioni).map(([k, n]) => `${t(les.eventi[k] || k)} ${n}`).join(", ") || "—";
+  const lessons = h("section", {class: "block"}, h("h2", null, t("Lezioni per rivista")), h("p", {class: "t-sub"}, t(les.nota)),
+    les.riviste.length ? h("div", {class: "table-wrap"}, h("table", null,
+      h("thead", null, h("tr", null, ["Rivista", "Sottomissioni", "Decisioni", "Commenti (confermati)", "Categorie (commenti)", "Giorni alla prima decisione"].map((c) => h("th", {scope: "col"}, t(c))))),
+      h("tbody", null, les.riviste.map((j) => h("tr", null, h("th", {scope: "row"}, j.rivista), h("td", {class: "num"}, fmtN(j.sottomissioni)),
+        h("td", null, dec(j)), h("td", {class: "num"}, `${fmtN(j.commenti)} (${fmtN(j.confermati)})`),
+        h("td", null, j.categorie.length ? j.categorie.map((c) => `${t(c.nome)} ${c.commenti}`).join(", ") : "—"),
+        h("td", {class: "num"}, j.giorni_alla_prima_decisione.n ? `${fmtN(j.giorni_alla_prima_decisione.mediana)} (N = ${j.giorni_alla_prima_decisione.n})` : "—"))))))
+      : h("p", {class: "empty"}, t("Ancora nessuna sottomissione.")));
+  put(view, ...head("Sottomissioni", t("Il diario dei tuoi articoli sottomessi: riviste, decisioni, lettere e le motivazioni o i commenti di editor e revisori che scrivi tu, classificati da Claude e confermati da te. Le lettere restano solo su questo PC: mai su GitHub, nei registri o nei pacchetti dei colleghi."),
+    refreshButton(reload)),
+    h("div", {class: "kpis"}, kpi(s.lavori, "lavori"), kpi(s.sottomissioni, "sottomissioni"), kpi(s.commenti, "commenti"),
+      kpi(s.commenti_classificati, "classificati"), kpi(s.classificazioni_confermate, "confermati da te")),
+    forms, ...papers, lessons, srcLine(d));
 };
 function savePickMs() { try { localStorage.setItem(MS_KEY, JSON.stringify([...msState.riviste])); } catch (e) { /* not available */ } }
 function msResult(r) {
@@ -1477,7 +1841,7 @@ for (const b of document.querySelectorAll("[data-lang-set]")) b.addEventListener
 const SHARED = ["lavora", "condivisione", "sistema"];
 const NAV = {
   orpheus: [["panoramica", "Panoramica"], ["articoli", "Articoli"], ["riviste", "Riviste"], ["manoscritti", "Manoscritti"],
-    ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["lavora", "Lavora"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
+    ["sottomissioni", "Sottomissioni"], ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["lavora", "Lavora"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
   eurydike: [["eurydike/panoramica", "Panoramica"], ["eurydike/protocollo", "Protocollo"], ["eurydike/screening", "Screening"],
     ["eurydike/fulltext", "Full text"], ["eurydike/estrazione", "Estrazione (schede)"], ["eurydike/bias", "Rischio di bias"],
     ["eurydike/consenso", "Consenso"], ["eurydike/meta", "Meta-analisi"], ["eurydike/esporta", "Esporta"], null,

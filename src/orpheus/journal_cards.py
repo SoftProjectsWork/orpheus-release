@@ -665,3 +665,162 @@ def instructions() -> dict:
             "regole": ["ogni valore 'reported'/'interpreted' ha pagina e citazione copiata (12-500 caratteri)",
                        "'not_available' = le linee guida non lo dicono: niente valore, pagina, citazione",
                        "ogni numero del valore è nella citazione; l'unità (es. words) è scritta nella citazione"]}
+
+
+# ---------------------------------------------------------------- T-052: values written by hand (migration 0019)
+MANUAL_ACTOR = "dashboard"
+TYPE_LEVEL = set(TYPE_FIELDS)
+NUMERIC_FIELDS = {k for k, v in FIELDS.items() if v.get("numero")}
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class ManualError(ValueError):
+    """A value by hand refused, with a message for the user."""
+
+
+def _has_manual(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'journal_card_manual'").fetchone() \
+        is not None
+
+
+def manual_values(conn: sqlite3.Connection, journal_id: str, *, history: bool = False) -> list[dict]:
+    """The values written by hand for a journal: only the current ones, or every row (history). Read-only."""
+    if not _has_manual(conn):
+        return []
+    where = "" if history else " AND status = 'current'"
+    return [dict(r) for r in conn.execute(
+        f"""SELECT * FROM journal_card_manual WHERE journal_id = ?{where}
+            ORDER BY field, coalesce(article_type, ''), item, created_at""", (journal_id,))]
+
+
+def current_card(conn: sqlite3.Connection, journal_id: str) -> sqlite3.Row | None:
+    return conn.execute("""SELECT * FROM journal_card WHERE journal_id = ? AND status = 'current'
+                           ORDER BY created_at DESC LIMIT 1""", (journal_id,)).fetchone()
+
+
+def effective_values(conn: sqlite3.Connection, journal_id: str) -> list[dict]:
+    """The rules of a journal as ORPHEUS uses them: the values of the current card from the PDF, where a value written
+    by hand for the same field and article type takes their place (all of them: a list of altri_elementi is written
+    again by hand as a whole). Every value says where it comes from: origin 'manual' (with source and date read) or
+    the origin of the PDF value (with the page). Read-only."""
+    card = current_card(conn, journal_id)
+    pdf = [dict(r) for r in conn.execute("SELECT * FROM journal_card_value WHERE card_id = ? ORDER BY ord",
+                                         (card["id"],))] if card else []
+    manual = manual_values(conn, journal_id)
+    replaced = {(m["field"], m["article_type"]) for m in manual}
+    out = []
+    for v in pdf:
+        if (v["field"], v["article_type"]) in replaced:
+            continue
+        out.append({"field": v["field"], "article_type": v["article_type"], "value": v["value"], "number": v["number"],
+                    "unit": v["unit"], "page_no": v["page_no"], "quote": v["quote"], "origin": v["origin"],
+                    "note": v["note"], "card_id": v["card_id"], "ord": v["ord"], "manual_id": None, "source": None,
+                    "read_on": None})
+    for m in manual:
+        na = m["action"] == "not_available"
+        out.append({"field": m["field"], "article_type": m["article_type"], "value": None if na else m["value"],
+                    "number": m["number"], "unit": m["unit"], "page_no": None, "quote": None,
+                    "origin": "not_available" if na else "manual", "note": m["note"], "card_id": None, "ord": None,
+                    "manual_id": m["id"], "source": m["source"], "read_on": m["read_on"], "item": m["item"]})
+    order = {k: i for i, k in enumerate(FIELD_NAMES)}
+    out.sort(key=lambda v: (v["article_type"] is not None and v["article_type"] != ALL_TYPES,
+                            order.get(v["field"], 99), v["article_type"] or "", v.get("ord") or 0, v.get("item") or 0))
+    return out
+
+
+def journals_with_rules(conn: sqlite3.Connection) -> list[str]:
+    """Journals with a current card from the PDF or with current values by hand."""
+    ids = {r[0] for r in conn.execute("SELECT journal_id FROM journal_card WHERE status = 'current'")}
+    if _has_manual(conn):
+        ids |= {r[0] for r in conn.execute("SELECT DISTINCT journal_id FROM journal_card_manual WHERE status = 'current'")}
+    return sorted(ids)
+
+
+def _clean(v) -> str | None:
+    v = None if v is None else str(v).strip()
+    return v or None
+
+
+def set_manual(conn: sqlite3.Connection, journal_id: str, field: str, *, value: str | None, source: str, read_on: str,
+               article_type: str | None = None, item: int = 1, unit: str | None = None, note: str | None = None,
+               not_available: bool = False, actor: str = MANUAL_ACTOR) -> str:
+    """Write a value by hand (T-052): a new row; the current one with the same field, type and item becomes superseded.
+    Checks: field of journal-cards-v1, article type only for the fields per type (tutti i tipi allowed), source and
+    date always, the number of a numeric field read from the value. Returns the id of the new row."""
+    if not conn.execute("SELECT 1 FROM journal WHERE id = ?", (journal_id,)).fetchone():
+        raise ManualError("rivista non trovata")
+    if field not in FIELDS:
+        raise ManualError(f"campo sconosciuto: {field}")
+    article_type, value, source, unit, note = map(_clean, (article_type, value, source, unit, note))
+    if field in TYPE_LEVEL and not article_type:
+        raise ManualError(f"{field} è un campo per tipo di articolo: scrivi il tipo (o «{ALL_TYPES}»)")
+    if field not in TYPE_LEVEL and article_type:
+        raise ManualError(f"{field} è un campo della rivista: lascia vuoto il tipo di articolo")
+    if not source:
+        raise ManualError("scrivi la fonte: indirizzo della pagina, PDF e pagina, oppure una nota")
+    if not read_on or not _DATE.match(str(read_on)):
+        raise ManualError("scrivi la data in cui hai letto la fonte (AAAA-MM-GG)")
+    if not not_available and not value:
+        raise ManualError("scrivi il valore (oppure scegli «non indicato dalla rivista»)")
+    if value and len(value) > cards.VALUE_MAX:
+        raise ManualError(f"valore troppo lungo (massimo {cards.VALUE_MAX} caratteri)")
+    try:
+        item = int(item)
+    except (TypeError, ValueError):
+        raise ManualError("numero del valore non valido") from None
+    if item < 1:
+        raise ManualError("numero del valore non valido")
+    number = None
+    if field in NUMERIC_FIELDS and not not_available:
+        number = first_number(value)
+        if number is None:
+            raise ManualError(f"{field} è un limite numerico: il valore deve contenere il numero (es. «3500 parole»)")
+        lo, hi = FIELDS[field]["intervallo"]
+        if not lo <= number <= hi:
+            raise ManualError(f"{field}: {number:g} fuori dall'intervallo plausibile {lo}–{hi}")
+    card = current_card(conn, journal_id)
+    with transaction(conn):
+        old = conn.execute("""SELECT id FROM journal_card_manual WHERE journal_id = ? AND field = ?
+                              AND coalesce(article_type, '') = coalesce(?, '') AND item = ? AND status = 'current'""",
+                           (journal_id, field, article_type, item)).fetchone()
+        if old:
+            conn.execute("UPDATE journal_card_manual SET status = 'superseded' WHERE id = ?", (old[0],))
+        mid = new_id("journal_card_manual")
+        conn.execute("""INSERT INTO journal_card_manual (id, journal_id, field, article_type, item, action, value, number,
+                            unit, source, read_on, note, replaces_card_id, supersedes_id, actor)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (mid, journal_id, field, article_type, item, "not_available" if not_available else "set",
+                      None if not_available else value, number, unit, source, str(read_on), note,
+                      card["id"] if card else None, old[0] if old else None, actor))
+        audit.record(conn, actor=actor, action="journal_card_manual_set", entity_type="journal_card_manual",
+                     entity_id=mid, payload={"journal_id": journal_id, "field": field, "article_type": article_type,
+                                             "item": item, "replaces": old[0] if old else None}, in_transaction=True)
+    return mid
+
+
+def withdraw_manual(conn: sqlite3.Connection, manual_id: str, *, actor: str = MANUAL_ACTOR) -> None:
+    """Take back a value by hand: it stays in the history as 'withdrawn'; the value from the PDF (if any) is used again."""
+    r = conn.execute("SELECT status FROM journal_card_manual WHERE id = ?", (manual_id,)).fetchone()
+    if r is None:
+        raise ManualError("valore non trovato")
+    if r[0] != "current":
+        raise ManualError("questo valore è già stato sostituito o tolto")
+    with transaction(conn):
+        conn.execute("UPDATE journal_card_manual SET status = 'withdrawn' WHERE id = ?", (manual_id,))
+        audit.record(conn, actor=actor, action="journal_card_manual_withdraw", entity_type="journal_card_manual",
+                     entity_id=manual_id, in_transaction=True)
+
+
+def card_view(conn: sqlite3.Connection, journal_id: str) -> dict:
+    """For the dashboard: the journal, its current card (date, guideline version), the effective values and the
+    history of the values by hand. Read-only."""
+    j = conn.execute("SELECT id, title FROM journal WHERE id = ?", (journal_id,)).fetchone()
+    if j is None:
+        raise ManualError("rivista non trovata")
+    card = current_card(conn, journal_id)
+    return {"journal_id": j["id"], "titolo": j["title"],
+            "scheda": {"id": card["id"], "data": card["created_at"], "versione": card["card_version"]} if card else None,
+            "valori": effective_values(conn, journal_id), "storia": manual_values(conn, journal_id, history=True),
+            "campi": [{"campo": k, "per_tipo": k in TYPE_LEVEL, "numero": bool(v.get("numero")),
+                       "descrizione": v["descrizione"]} for k, v in FIELDS.items()],
+            "tutti_i_tipi": ALL_TYPES}

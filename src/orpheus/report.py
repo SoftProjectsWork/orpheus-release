@@ -184,10 +184,10 @@ def _comparison(conn: sqlite3.Connection, journal_list: list[dict] | None = None
     article) and the journal rules. Read-only."""
     sigla_of = _sigla_of(conn, journal_list)
     rows = []
-    for c in conn.execute("""SELECT c.id, c.journal_id, j.title FROM journal_card c JOIN journal j ON j.id = c.journal_id
-                             WHERE c.status = 'current' ORDER BY j.title"""):
-        vals = conn.execute("SELECT ord, field, article_type, value, origin FROM journal_card_value WHERE card_id = ? "
-                            "ORDER BY ord", (c["id"],)).fetchall()
+    journals = [conn.execute("SELECT id AS journal_id, title FROM journal WHERE id = ?", (jid,)).fetchone()
+                for jid in journal_cards.journals_with_rules(conn)]
+    for c in sorted(journals, key=lambda r: r["title"] or ""):
+        vals = journal_cards.effective_values(conn, c["journal_id"])     # PDF values and values by hand (T-052)
         first = next((v for v in vals if v["field"] == "tipo_articolo"), None)
         kind = first["article_type"] if first else None
 
@@ -205,8 +205,11 @@ def _comparison(conn: sqlite3.Connection, journal_list: list[dict] | None = None
         for f, _ in RULE_FIELDS:
             row[f] = pick(f, [None])
         rows.append(row)
-    return {"fonte": "journal_card, journal_card_value (schede delle riviste correnti, journal-cards-v1)",
-            "data": _one(conn, "SELECT max(created_at) FROM journal_card"), "righe": rows}
+    last = max(filter(None, [_one(conn, "SELECT max(created_at) FROM journal_card"),
+                             _one(conn, "SELECT max(created_at) FROM journal_card_manual")
+                             if journal_cards._has_manual(conn) else None]), default=None)
+    return {"fonte": "journal_card, journal_card_value (schede delle riviste correnti, journal-cards-v1) e "
+                     "journal_card_manual (valori scritti a mano)", "data": last, "righe": rows}
 
 
 def _metrics(conn: sqlite3.Connection, journal_list: list[dict] | None = None) -> dict:

@@ -11,6 +11,8 @@ esporta → one .zip file (format orpheus-condivisione/1): manifest.json + condi
             * current article cards (cards-v1) with their values, cards-v2 items and outcome rows, current claims and
               evidence;
             * the parts of the articles: text segments with their vectors, sections of open texts;
+            * what the articles report about methods, statistics, transparency and structure (T-057, stats-terms):
+              text_method_item and text_structure (the user's hand check text_method_check stays here);
             * the rows those depend on (documents, snapshots, runs, tasks, agents, models, project, sources).
           Never: PDF files, page texts, manuscripts and drafts (R10), EURYDIKE reviews, the audit log, backups, .env.
           Snapshot storage paths are blanked (the files are not in the package). Export only READS the database.
@@ -51,9 +53,13 @@ ROOTS: list[tuple[str, str, tuple[str, ...] | None, str]] = [
     ("journal", "1", None, ""),
     ("journal_metric", "1", None, ""),
     ("journal_card", "status = 'current'", ("journal_id", "card_version"), "status = 'current'"),
+    # T-052: values written by hand (journal facts, with source): per journal, "tieni sempre la tua" as for the cards
+    ("journal_card_manual", "status = 'current'", ("journal_id",), "status = 'current'"),
     ("article", "1", None, ""),
     ("article_section", "1", ("article_id",), ""),
     ("segment", "article_id IS NOT NULL", ("article_id", "rules"), ""),
+    ("text_structure", "1", ("article_id", "rules"), ""),         # T-057: counted from the articles (decision 2026-10-27)
+    ("text_method_item", "1", ("article_id", "rules"), ""),
     ("article_card", "status = 'current'", ("article_id", "card_version"), "status = 'current'"),
     ("card_item", "1", ("article_id",), ""),
     ("card_outcome_row", "1", ("article_id",), ""),
@@ -253,7 +259,8 @@ def summary_counts(counts: dict[str, int]) -> dict[str, int]:
             "articoli": counts.get("article", 0), "schede_articoli": counts.get("article_card", 0),
             "valori_scheda_unica": counts.get("card_item", 0), "pezzi_di_testo": counts.get("segment", 0),
             "vettori": counts.get("segment_vector", 0), "sezioni_testi_aperti": counts.get("article_section", 0),
-            "affermazioni": counts.get("scientific_claim", 0)}
+            "affermazioni": counts.get("scientific_claim", 0), "voci_metodi": counts.get("text_method_item", 0),
+            "articoli_con_struttura": counts.get("text_structure", 0)}
 
 
 # ---------------------------------------------------------------- import
@@ -454,6 +461,7 @@ def merge_package(local: sqlite3.Connection, package: Path, *, dry_run: bool = F
                                   "articoli_nuovi": m.new.get("article", 0),
                                   "schede_articoli_nuove": m.new.get("article_card", 0),
                                   "pezzi_di_testo_nuovi": m.new.get("segment", 0),
+                                  "voci_metodi_nuove": m.new.get("text_method_item", 0),
                                   "schede_gia_presenti_tenute_le_tue": m.kept.get("journal_card", 0)
                                   + m.kept.get("article_card", 0)},
                     "prova": dry_run,

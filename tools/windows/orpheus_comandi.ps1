@@ -44,6 +44,15 @@
 #              nella cartella locale del PC)
 #   benchmark_ricerca  recall@5/@10 della ricerca (pagine = prima, parole, significato, ibrida) sulle domande controllate
 #              dall'utente (orpheus benchmark-ricerca); solo lettura
+#   metodi     T-057: copia di sicurezza, poi metodi statistici, trasparenza e struttura degli articoli completi
+#              (orpheus metodi, stats-terms-v1); poi il file di controllo a mano o, se compilato, la precisione
+#              (orpheus metodi-controllo)
+#   obiettivi  T-057c: copia di sicurezza, poi le schede di obiettivo e disegno scritte da Claude
+#              (rapporti\schede_obiettivi\da_inviare; orpheus obiettivi, obiettivi-v1) e i pacchetti nuovi fino a 10
+#              aperti (prima sport, esercizio fisico e biomeccanica)
+#   riscontri  T-056: copia di sicurezza, poi le classificazioni dei commenti di editor e revisori scritte da Claude
+#              (rapporti\riscontri\da_inviare; orpheus riscontri, feedback-v1) e i pacchetti delle lettere da
+#              classificare; solo conteggi (R10: mai il testo delle lettere)
 #   affermazioni  copia di sicurezza, poi le affermazioni scritte da Claude (rapporti\affermazioni\da_inviare; orpheus
 #              affermazioni, claims-v1, livello della prova appraisal-v1); poi il file di controllo a mano o, se
 #              compilato, la precisione (orpheus affermazioni-controllo)
@@ -85,7 +94,7 @@
 # anche a GitHub (ramo registri-pc, pubblica_registro.ps1), dove lo legge il loop di Claude nel cloud.
 # Questi file sono copiati in C:\ORPHEUS dall'installatore: le versioni aggiornate arrivano con installa_orpheus.cmd.
 
-param([Parameter(Mandatory = $true)][ValidateSet('leggi', 'cerca', 'controllo', 'verifica', 'verifica_pubmed', 'benchmark', 'doppioni', 'autori', 'europepmc', 'riferimenti', 'verifica_citazioni', 'pacchetti', 'schede', 'controllo_schede', 'report', 'prova_ripristino', 'riviste', 'schede_riviste', 'metriche_riviste', 'semantica', 'benchmark_ricerca', 'affermazioni', 'lavora', 'cruscotto', 'manoscritto', 'schede_locali', 'nuovo_articolo', 'chat_schede', 'revisione', 'lettera', 'risposta', 'validazione', 'aggiorna_articoli', 'aggiorna_riviste', 'invia_lavoro_claude', 'manutenzione', 'prepara_manoscritto', 'invia_schede_chat', 'revisione_sistematica', 'scheda_unica', 'esporta_schede', 'importa_schede')][string]$Comando,
+param([Parameter(Mandatory = $true)][ValidateSet('leggi', 'cerca', 'controllo', 'verifica', 'verifica_pubmed', 'benchmark', 'doppioni', 'autori', 'europepmc', 'riferimenti', 'verifica_citazioni', 'pacchetti', 'schede', 'controllo_schede', 'report', 'prova_ripristino', 'riviste', 'schede_riviste', 'metriche_riviste', 'semantica', 'benchmark_ricerca', 'affermazioni', 'lavora', 'cruscotto', 'manoscritto', 'schede_locali', 'nuovo_articolo', 'chat_schede', 'revisione', 'lettera', 'risposta', 'validazione', 'aggiorna_articoli', 'aggiorna_riviste', 'invia_lavoro_claude', 'manutenzione', 'prepara_manoscritto', 'invia_schede_chat', 'revisione_sistematica', 'scheda_unica', 'esporta_schede', 'importa_schede', 'metodi', 'obiettivi', 'riscontri')][string]$Comando,
       [string]$File = '')
 
 $ErrorActionPreference = 'Continue'
@@ -1046,6 +1055,105 @@ function Invoke-Affermazioni {
     Write-Log '  Scrivi a Claude: "affermazioni fatte".'
 }
 
+# ---------------------------------------------------------------- metodi statistici degli articoli (T-057)
+function Invoke-Metodi {
+    Write-Log ''
+    Write-Log 'COPIA DI SICUREZZA DEL DATABASE (prima di scrivere i metodi degli articoli)'
+    $b = Invoke-Orpheus @('backup')
+    if ($b.Code -ne 0 -or -not $b.Json -or -not $b.Json.backup) {
+        Show-Error $b
+        Write-Log '  Metodi NON scritti: prima serve una copia di sicurezza riuscita.'
+        if ($b.Raw -match 'migrate') { Write-Log "  Fai prima doppio clic su $Root\installa_orpheus.cmd: aggiorna il database alla nuova versione." }
+        return
+    }
+    Write-Log "  Fatta: $($b.Json.backup)"
+    Write-Log ''
+    Write-Log 'METODI STATISTICI, TRASPARENZA E STRUTTURA DEGLI ARTICOLI COMPLETI (stats-terms-v1, con pagina e frase)...'
+    $r = Invoke-Orpheus @('metodi')
+    if (-not $r.Json -or -not $r.Json.riepilogo) { Show-Error $r; return }
+    $j = $r.Json
+    Write-Log ("  Articoli: {0} (nuovi {1}, da rifare {2}, uguali {3}); voci trovate {4}" -f $j.riepilogo.articoli, $j.riepilogo.azioni.nuovi, $j.riepilogo.azioni.'da rifare', $j.riepilogo.azioni.uguali, $j.riepilogo.voci)
+    Write-Log ("  Nel database: voci {0}, articoli con voci {1}, articoli con struttura {2}" -f $j.nel_database.voci, $j.nel_database.articoli_con_voci, $j.nel_database.articoli_con_struttura)
+    if ($j.verifica_copia) { Write-Log "  ATTENZIONE: $($j.verifica_copia.messaggio)"; return }
+    Write-Log ''
+    Write-Log 'CONTROLLO A MANO DI UN CAMPIONE (al massimo 5 voci per tipo)...'
+    $c = Invoke-Orpheus @('metodi-controllo')
+    if (-not $c.Json -or -not $c.Json.modo) { Show-Error $c; return }
+    $k = $c.Json
+    if ($k.modo -eq 'file da compilare') {
+        Write-Log "  File da compilare ($($k.righe) righe): $($k.file_csv)"
+        Write-Log '  Aprilo con Excel: per ogni riga leggi la frase (pagina del PDF indicata) e scrivi S o N nella colonna giusto:'
+        Write-Log '  S se l''articolo stesso usa (o riporta, o dichiara) la voce, N se no (es. citata da un altro studio). Se N, scrivi il perche'' in note.'
+        Write-Log "  Salvalo come: $($k.file_da_salvare)  (CSV), poi rilancia metodi.cmd."
+    } elseif ($k.modo -eq 'risultati') {
+        $pc = $k.precisione_complessiva
+        Write-Log ("  Voci controllate: giuste {0}, sbagliate {1}, non compilate {2}; precisione {3}" -f $pc.giusti, $pc.sbagliati, $pc.non_compilati, $pc.precisione)
+        foreach ($p in $k.per_gruppo.PSObject.Properties) { if ($p.Value.giusti -or $p.Value.sbagliati) { Write-Log ("    {0}: giuste {1}, sbagliate {2}" -f $p.Name, $p.Value.giusti, $p.Value.sbagliati) } }
+        foreach ($x in @($k.sbagliate | Select-Object -First 20)) { if ($x) { Write-Log "    ! riga $($x.n): $($x.voce) $($x.note)" } }
+        Write-Log "  Giudizi nuovi registrati nel database: $($k.giudizi_scritti)"
+    } else { Write-Log '  Niente da controllare.' }
+    Write-Log '  Scrivi a Claude: "metodi fatti".'
+}
+
+# ---------------------------------------------------------------- obiettivo e disegno degli articoli (T-057c)
+function Invoke-Obiettivi {
+    Write-Log ''
+    Write-Log 'OBIETTIVO E DISEGNO DEGLI ARTICOLI (obiettivi-v1, nella scheda unica cards-v2): invio delle schede scritte da'
+    Write-Log 'Claude e pacchetti nuovi (prima sport, esercizio fisico e biomeccanica). Copia di sicurezza prima di scrivere.'
+    # 2026-10-28: si puo' scegliere una rivista (es. SJMSS); dal cruscotto arriva in ORPHEUS_OBIETTIVI_RIVISTA.
+    $sigla = "$env:ORPHEUS_OBIETTIVI_RIVISTA".Trim()
+    if (-not $sigla -and -not $env:ORPHEUS_OBIETTIVI_NON_CHIEDERE) {
+        Write-Host ''
+        Write-Host '  Pacchetti nuovi di una sola rivista? Scrivi la sigla (es. SJMSS) e premi Invio;'
+        $sigla = "$(Read-Host '  solo Invio = tutte le riviste, prima sport, esercizio fisico e biomeccanica')".Trim()
+    }
+    # 2026-10-28 12:17: anche 30-50 pacchetti alla volta (massimo 50); dal cruscotto in ORPHEUS_OBIETTIVI_QUANTI.
+    $n = "$env:ORPHEUS_OBIETTIVI_QUANTI".Trim()
+    if (-not $n -and -not $env:ORPHEUS_OBIETTIVI_NON_CHIEDERE) {
+        $n = "$(Read-Host '  Quanti pacchetti aperti vuoi? (solo Invio = 10, massimo 50)')".Trim()
+    }
+    $qty = 10; if ([int]::TryParse("$n", [ref]$qty)) { $qty = [Math]::Min(50, [Math]::Max(1, $qty)) } else { $qty = 10 }
+    $argsO = @('obiettivi', '--pacchetti', "$qty")
+    if ($sigla) { $argsO += @('--rivista', $sigla); Write-Log "  Rivista scelta: $sigla" }
+    Write-Log "  Pacchetti aperti voluti: $qty"
+    $r = Invoke-Orpheus $argsO
+    if (-not $r.Json -or -not $r.Json.contratto) { Show-Error $r; return }
+    $j = $r.Json
+    if ($j.verifica_copia) { Write-Log "  ATTENZIONE: $($j.verifica_copia.messaggio)"; return }
+    if ($j.backup_prima_della_scrittura) { Write-Log "  Copia di sicurezza: $($j.backup_prima_della_scrittura)" }
+    if ($j.invio) {
+        Write-Log ("  Schede inviate: {0} (accettate {1}, rifiutate {2})" -f $j.invio.inviate, $j.invio.accettate, $j.invio.rifiutate)
+        foreach ($x in @($j.invio.schede)) {
+            if ($x.esito -ne 'accettata') { Write-Log "    ! $($x.file): $(@($x.motivi | Select-Object -First 3) -join ' | ')" }
+        }
+    } else { Write-Log '  Nessuna scheda da inviare.' }
+    Write-Log ("  Pacchetti aperti per Claude: {0} (nuovi {1}); articoli ancora da fare dopo questi: {2} (sul tema: {3})" -f $j.pacchetti_aperti, $j.esecuzioni_nuove, $j.da_fare_dopo, $j.sul_tema)
+    if ($j.rivista) { Write-Log ("  Di {0}: pacchetti aperti {1}; articoli di {0} ancora da fare dopo questi: {2}" -f $j.rivista, $j.aperti_della_rivista, $j.da_fare_dopo) }
+    if ($j.non_studi_esclusi) { Write-Log "  Non-studi lasciati fuori (viewpoint, editoriali, senza Metodi): $($j.non_studi_esclusi)" }
+    foreach ($p in @($j.problemi)) { if ($p) { Write-Log "    ! $($p.article_id): $($p.problema)" } }
+    Write-Log "  Nel database: articoli con obiettivo $($j.stato.articoli_con_obiettivo)"
+    Write-Log '  Scrivi a Claude: "obiettivi fatti".'
+}
+
+# ---------------------------------------------------------------- commenti di editor e revisori (T-056)
+function Invoke-Riscontri {
+    Write-Log ''
+    Write-Log 'COMMENTI DI EDITOR E REVISORI DELLE TUE SOTTOMISSIONI (feedback-v1): invio delle classificazioni scritte da'
+    Write-Log 'Claude e pacchetti delle lettere da classificare. Le lettere restano sul PC. Copia di sicurezza prima di scrivere.'
+    $r = Invoke-Orpheus @('riscontri')
+    if (-not $r.Json -or -not $r.Json.contratto) { Show-Error $r; return }
+    $j = $r.Json
+    if ($j.verifica_copia) { Write-Log "  ATTENZIONE: $($j.verifica_copia.messaggio)"; return }
+    if ($j.backup_prima_della_scrittura) { Write-Log "  Copia di sicurezza: $($j.backup_prima_della_scrittura)" }
+    if ($j.invio) {
+        Write-Log ("  File inviati: {0} (accettati {1}, rifiutati {2})" -f $j.invio.inviate, $j.invio.accettate, $j.invio.rifiutate)
+        foreach ($x in @($j.invio.file)) { if ($x.esito -ne 'accettata') { Write-Log "    ! $($x.file): $(@($x.motivi | Select-Object -First 3) -join ' | ')" } }
+    } else { Write-Log '  Nessuna classificazione da inviare.' }
+    Write-Log ("  Lettere con pacchetto per Claude: {0} (nuove {1})" -f $j.pacchetti.pacchetti_aperti, $j.pacchetti.esecuzioni_nuove)
+    Write-Log ("  Nel database: sottomissioni {0}, commenti {1}, classificati {2}, confermati da te {3}" -f $j.stato.sottomissioni, $j.stato.commenti, $j.stato.commenti_classificati, $j.stato.classificazioni_confermate)
+    Write-Log '  Scrivi a Claude: "riscontri fatti".'
+}
+
 function Invoke-Lavora([string]$Gruppo = 'tutto') {
     Write-Log ''
     if ($Gruppo -eq 'tutto') {
@@ -1924,6 +2032,9 @@ switch ($Comando) {
     'semantica' { Invoke-Semantica }
     'benchmark_ricerca' { Invoke-BenchmarkRicerca }
     'affermazioni' { Invoke-Affermazioni }
+    'metodi' { Invoke-Metodi }
+    'obiettivi' { Invoke-Obiettivi }
+    'riscontri' { Invoke-Riscontri }
     'lavora'    { Invoke-Lavora }
     'cruscotto' { Invoke-Cruscotto }
     'manoscritto' { Invoke-Manoscritto }

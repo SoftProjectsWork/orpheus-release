@@ -25,6 +25,7 @@ PREFIXES: dict[str, str] = {
     "fulltext_check": "ftc",
     "article_card": "crd",
     "journal_card": "jcd",
+    "journal_card_manual": "jcm",
     "journal": "jrn",
     "journal_policy_version": "jpv",
     "journal_metric": "jmt",
@@ -44,6 +45,13 @@ PREFIXES: dict[str, str] = {
     "alert": "alr",
     "audit_event": "aev",
     "segment": "seg",
+    "text_method_item": "tmi",  # T-057 (migration 0016)
+    "my_manuscript": "msr",  # T-056 (migration 0017)
+    "submission": "sub",
+    "submission_letter": "sle",
+    "submission_event": "sev",
+    "reviewer_comment": "rvc",
+    "comment_label": "cml",
     # EURYDIKE (migration 0014)
     "card_item": "cdi",
     "card_outcome_row": "cor",

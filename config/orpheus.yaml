@@ -2,7 +2,7 @@
 # Changing a value here is a configuration change: record it in CHANGELOG.md.
 project:
   name: ORPHEUS
-  version: 0.55.1                  # allineata a pyproject.toml il 2026-10-27 (era 0.5.0); vale solo come etichetta
+  version: 0.56.0                  # allineata a pyproject.toml il 2026-10-27 (era 0.5.0); vale solo come etichetta
   responsible_human: null          # DA DEFINIRE con l'utente
   language: it
   research_domains:

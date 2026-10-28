@@ -66,6 +66,10 @@ Regole
    pacchetto>"} oppure {"tipo": "giudizio"} quando è il giudizio del revisore simulato.
 3. Ogni controllo con esito "ko" (da correggere) del pacchetto deve essere discusso da almeno un'osservazione con
    quella base. Per i controlli "guarda" decidi tu.
+3b. Lezioni dalle tue sottomissioni (sezione "lezioni" del pacchetto): ogni controllo del gruppo "Lezioni dalle tue
+   sottomissioni" con esito "guarda" va discusso da almeno un'osservazione con quella base (di solito dell'editor o del
+   profilo più vicino alla categoria): dove il manoscritto risponde già, gravità "suggerimento"; altrimenti la
+   proposta concreta. Sono promemoria dalle tue sottomissioni passate, non regole della rivista.
 4. Non inventare dati, riferimenti o regole: le regole della rivista sono quelle dei controlli (con la pagina delle
    linee guida in "fonte").
 5. Copia "impronta" e "rivista" dal pacchetto; "modello": il modello che scrive (es. claude-opus-5-5).
@@ -112,6 +116,14 @@ def paragraphs(m: ms.Manuscript) -> list[dict]:
     return out
 
 
+LESSONS_GROUP = "Lezioni dalle tue sottomissioni"      # = submissions.GROUP (point 9, 2026-10-28)
+
+
+def lessons_to_discuss(packet: dict) -> list[dict]:
+    """The "guarda" checks of the lessons from the user's submissions: each must be discussed by an observation."""
+    return [c for c in packet.get("controlli") or [] if c.get("gruppo") == LESSONS_GROUP and c.get("esito") == "guarda"]
+
+
 def build_packet(m: ms.Manuscript, result: dict, now: datetime | None = None) -> dict:
     """result: compliance.run for ONE journal."""
     j = result["riviste"][0]
@@ -125,6 +137,7 @@ def build_packet(m: ms.Manuscript, result: dict, now: datetime | None = None) ->
                     "affinita": j.get("affinita")},
         "tipo": result["tipo_testo"], "istruzioni": INSTRUCTIONS, "profili": PROFILES, "esempio": EXAMPLE,
         "riepilogo": result["manoscritto"], "controlli": checks,
+        "lezioni": [c for c in checks if c["gruppo"] == LESSONS_GROUP],
         "manoscritto": {"titolo": m.title, "paragrafi": paragraphs(m),
                         "riferimenti": [{"n": r.n, "testo": r.text, "doi": r.doi} for r in m.references]},
         "nota": "Revisione simulata: non è una previsione dell'esito della rivista.",
@@ -258,6 +271,9 @@ def check_review(packet: dict, data) -> list[Result]:
     miss = [f"il controllo da correggere \"{c['titolo']}\" ({c['id']}) non è discusso da nessuna osservazione"
             for c in packet["controlli"] if c["esito"] == "ko" and c["id"] not in covered]
     out.append(Result("copertura", not miss, miss))
+    les = [f"la lezione \"{c['titolo']}\" ({c['id']}) non è discussa da nessuna osservazione"
+           for c in lessons_to_discuss(packet) if c["id"] not in covered]
+    out.append(Result("lezioni", not les, les))
     out.append(Result("simulazione", not sim, sim))
     return out
 
@@ -355,6 +371,15 @@ def render_html(packet: dict, data: dict, now: datetime) -> str:
         parts.append("<h2>Controlli da correggere e osservazioni che li discutono</h2><table><tr><th>Controllo</th>"
                      "<th>Trovato</th><th>Discusso da</th></tr>")
         for ch in ko:
+            who = sorted({p["profilo"] for p in data["profili"] for o in p["osservazioni"]
+                          for b in o["basi"] if b.get("id") == ch["id"]})
+            parts.append(f"<tr><td>{_e(ch['titolo'])}</td><td>{_e(ch['trovato'])}</td><td>{_e(', '.join(who))}</td></tr>")
+        parts.append("</table>")
+    les = lessons_to_discuss(packet)
+    if les:
+        parts.append("<h2>Lezioni dalle tue sottomissioni e osservazioni che le discutono</h2><table><tr><th>Lezione</th>"
+                     "<th>Trovato</th><th>Discussa da</th></tr>")
+        for ch in les:
             who = sorted({p["profilo"] for p in data["profili"] for o in p["osservazioni"]
                           for b in o["basi"] if b.get("id") == ch["id"]})
             parts.append(f"<tr><td>{_e(ch['titolo'])}</td><td>{_e(ch['trovato'])}</td><td>{_e(', '.join(who))}</td></tr>")

@@ -400,3 +400,24 @@ input.file-hidden:focus-visible+label.file-pick{outline:2px solid var(--accent);
 .assign{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .assign select{max-width:260px;font:inherit;padding:4px 6px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);color:var(--ink)}
 .jform .form-grid{align-items:start}
+/* T-057: profile of a journal from its published articles */
+.prof-groups{display:grid;gap:18px;margin:8px 0 16px}
+.prof-group h3{margin:0 0 6px;font-size:15px}
+.prof-bars .prof-det,.prof-bars .prof-sent{grid-column:1/-1;margin-top:-4px}
+.prof-bars .prof-sent:empty{display:none}
+.prof-sent ul{margin:4px 0 8px}
+.warnline{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+@media (min-width:900px){.prof-groups{grid-template-columns:1fr 1fr}}
+.prof-sent ul.notes li{display:block}
+.prof-sent ul.notes li b{display:block;font-size:13px}
+.prof-sent ul.notes li .t-sub{display:block}
+/* T-056b: icon buttons (matita, cestino) */
+.btn.icon-btn{padding:5px 7px;gap:0;line-height:0;color:var(--ink-2)}
+.btn.icon-btn:hover{color:var(--ink)}
+.btn.icon-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.eur-bar>.btn.icon-btn+.btn.icon-btn{margin-left:4px}
+
+/* 2026-10-28: card by hand (T-052) */
+.fld.check{display:flex;align-items:center;gap:8px;align-self:end;padding-bottom:8px}
+.fld.check input{width:auto}
+.filters .field select{max-width:100%}

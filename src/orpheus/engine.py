@@ -7,6 +7,7 @@ heartbeat, commands, interrupted).
 Steps, in this order. Each runs the command(s) of a double-click file as a separate process (`python -m orpheus ...`),
 so every protection of the commands stays as it is: start-up check of the copy, backups before writing, checks:
   leggi, verifica_doi, riviste, verifica_pubmed, europepmc, citazioni, autori, schede, schede_riviste, segmenta,
+  metodi (T-057: statistical methods, transparency and structure, stats-terms-v1),
   vettori, modello (0.24.1: the model of the search by meaning on a PC that has not it yet), affermazioni, report.
 For each step ORPHEUS first counts what is missing (no network, nothing written). With nothing to do the step is
 skipped and nothing is written, so a second run in a row writes nothing (idempotent). Otherwise:
@@ -44,7 +45,7 @@ from typing import Callable
 
 from . import (audit, card_store, claims, dedup, doi_search, europepmc_survey, journal_cards, journal_metrics,
                journal_table, layout,
-               policy_changes, policy_versions, segments, semantic, verify_citations, verify_doi, verify_pubmed)
+               policy_changes, policy_versions, segments, semantic, stats_terms, verify_citations, verify_doi, verify_pubmed)
 from .db import transaction
 from .ids import new_id
 from .ingest_pdf import sha256_file
@@ -233,6 +234,11 @@ def segments_to_write(env: Env) -> int:
     return actions["nuovi"] + actions["da rifare"]
 
 
+def methods_to_write(env: Env) -> int:
+    actions = stats_terms.summary(stats_terms.plan(env.conn))["azioni"]
+    return actions["nuovi"] + actions["da rifare"]
+
+
 def vectors_to_compute(env: Env) -> int:
     return len(semantic.missing_segments(env.conn))
 
@@ -290,6 +296,8 @@ STEPS: tuple[Step, ...] = (
     Step("metriche", "Metriche delle riviste (SCImago e OpenAlex)", (("metriche-riviste",),), metrics_to_write,
          "riviste", network=True),
     Step("segmenta", "Pezzi di testo degli articoli completi", (("segmenta",),), segments_to_write, "articoli"),
+    Step("metodi", "Metodi statistici, trasparenza e struttura degli articoli completi", (("metodi",),), methods_to_write,
+         "articoli"),
     Step("vettori", "Vettori per la ricerca per significato", (("vettori",),), vectors_to_compute, "pezzi"),
     Step("modello", "Modello per la ricerca per significato su questo PC (una volta, circa 0,5 GB)",
          (("vettori", "--solo-scarica"),), model_to_download, "modello", network=True),
@@ -306,11 +314,11 @@ GROUPS: dict[str, dict] = {
     "tutto": {"titolo": "Tutto quello che manca", "passi": tuple(s.key for s in STEPS)},
     "articoli": {"titolo": "Articoli nuovi: lettura e verifiche",
                  "passi": ("leggi", "verifica_doi", "riconosci", "riviste", "verifica_pubmed", "europepmc", "citazioni", "autori",
-                           "segmenta", "vettori", "modello", "report")},
+                           "segmenta", "metodi", "vettori", "modello", "report")},
     "riviste": {"titolo": "Riviste: elenco, linee guida, schede e metriche",
                 "passi": ("sistema_riviste", "riviste", "schede_riviste", "metriche", "report")},
     "conoscenza": {"titolo": "Lavoro di Claude: schede, affermazioni e ricerca",
-                   "passi": ("schede", "segmenta", "vettori", "affermazioni", "report")},
+                   "passi": ("schede", "segmenta", "metodi", "vettori", "affermazioni", "report")},
 }
 
 

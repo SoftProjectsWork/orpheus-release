@@ -94,10 +94,9 @@ def _metrics(conn, journal_id: str) -> dict:
 
 
 def _scope(conn, journal_id: str) -> str:
-    rows = conn.execute("""SELECT v.value FROM journal_card_value v JOIN journal_card c ON c.id = v.card_id
-                           WHERE c.journal_id = ? AND c.status = 'current' AND v.field = 'ambito' AND v.value IS NOT NULL
-                           ORDER BY v.ord""", (journal_id,)).fetchall()
-    return "; ".join(r[0] for r in rows)
+    from . import journal_cards
+    return "; ".join(v["value"] for v in journal_cards.effective_values(conn, journal_id)
+                     if v["field"] == "ambito" and v["value"])
 
 
 def match(conn: sqlite3.Connection, m: Manuscript, journals: list[dict], matcher: Matcher | None = None) -> dict:

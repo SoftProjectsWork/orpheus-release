@@ -50,6 +50,41 @@ NEW_FIELDS: dict[str, dict] = {
     "variabili_derivate": {"tipo": "testo", "descrizione": "Variables derived from the raw data and how."},
     "analisi_statistica": {"tipo": "testo", "descrizione": "Statistical analysis: tests, models, significance level."},
 }
+
+# T-057c, level 2 (decisions of the user, 2026-10-27 17:0x): the objective and the design of every article, to read the
+# statistics by objective ("two time points, same subjects -> paired test"). Choice fields take one value of the list
+# (`valore` = the key), always with the exact sentence they rest on; one row each (ordine 1).
+OBJECTIVE_TYPES = {
+    "confronto_gruppi": "Comparison between groups",
+    "confronto_condizioni": "Comparison between conditions or limbs in the same subjects (e.g. operated vs healthy limb, "
+                            "two shoes; added 2026-10-28)",
+    "effetto_intervento": "Effect of an intervention (pre-post, with or without a control group)",
+    "associazione_predizione": "Association or prediction",
+    "affidabilita_validita": "Reliability or validity (of a measure, test or instrument)",
+    "descrittivo": "Descriptive",
+}
+COUNTS = {"uno": "one", "due": "two", "piu_di_due": "more than two"}
+YES_NO = {"si": "yes", "no": "no"}
+LEVEL2_NEW = {
+    "obiettivo": {"tipo": "testo", "descrizione": "Aim or hypothesis of the study, as written (one row each, `ordine`)."},
+    "tipo_obiettivo": {"tipo": "scelta", "valori": tuple(OBJECTIVE_TYPES),
+                       "descrizione": "Type of the main objective: " + "; ".join(f"{k} = {v}" for k, v in OBJECTIVE_TYPES.items())},
+    "disegno_tempi": {"tipo": "scelta", "valori": tuple(COUNTS),
+                      "descrizione": "Number of measurement time points of the main outcome: uno, due, piu_di_due."},
+    "disegno_gruppi": {"tipo": "scelta", "valori": tuple(COUNTS),
+                       "descrizione": "Number of groups (arms, conditions between subjects): uno, due, piu_di_due."},
+    "stessi_soggetti": {"tipo": "scelta", "valori": tuple(YES_NO),
+                        "descrizione": "Same subjects measured at every time point or condition (repeated measures): si / no."},
+    "crossover": {"tipo": "scelta", "valori": tuple(YES_NO),
+                  "descrizione": "Crossover design (every subject receives every condition in sequence): si / no."},
+    "esito_primario": {"tipo": "testo", "descrizione": "Primary (main) outcome as written; if none is declared primary, "
+                                                       "origin 'interpreted' and the outcome of the main aim."},
+    "analisi_principale": {"tipo": "testo", "descrizione": "Statistical test or model used for the primary outcome, as written."},
+    "effetto_principale": {"tipo": "testo", "descrizione": "Main effect for the primary outcome as written (effect size, "
+                                                           "difference, with the CI if written); 'not_available' if none."},
+}
+NEW_FIELDS.update(LEVEL2_NEW)
+LEVEL2_FIELDS = tuple(LEVEL2_NEW)
 FIELD_NAMES = V1_FIELDS + tuple(NEW_FIELDS)
 STATS = store.STATS
 NA_NOTE = "proposed by Claude as not reported: decide (Non riportato) or correct"
@@ -164,6 +199,12 @@ def check_packet_fields(card: Card, wanted: tuple[str, ...], decided: set[tuple[
         if v.campo in NEW_FIELDS and NEW_FIELDS[v.campo]["tipo"] == "misura" and v.unita and v.citazione \
                 and not cards.unit_in_quote(v.unita, v.citazione):
             probs.append(f"{_label(i, v)}: l'unità '{v.unita}' non è scritta nella citazione")
+        spec = NEW_FIELDS.get(v.campo, {})
+        if spec.get("tipo") == "scelta":
+            if v.valore is not None and v.valore not in spec["valori"]:
+                probs.append(f"{_label(i, v)}: valore '{v.valore}' non ammesso (ammessi: {', '.join(spec['valori'])})")
+            if v.ordine != 1:
+                probs.append(f"{_label(i, v)}: una sola riga (ordine 1)")
     return [CheckResult("campi_del_pacchetto", not probs, probs), CheckResult("gia_deciso", not done, done)]
 
 
