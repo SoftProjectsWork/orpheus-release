@@ -1,3 +1,3 @@
 """ORPHEUS — Open Research, Publication & High-Quality Editorial Understanding System."""
 
-__version__ = "0.58.3"
+__version__ = "0.60.0"

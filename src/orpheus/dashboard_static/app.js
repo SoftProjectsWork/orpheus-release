@@ -4,7 +4,8 @@
 "use strict";
 
 const TOKEN = document.body.dataset.token;
-const view = document.getElementById("view");
+const viewRoot = document.getElementById("view");
+let liveView = viewRoot;          /* a fresh box per route: a slow section never writes into the next one */
 const cache = new Map();
 const NS = "http://www.w3.org/2000/svg";
 let journalColors = new Map();
@@ -16,8 +17,18 @@ const EN = self.ORPHEUS_EN || {};
 const EN_TPL = (self.ORPHEUS_EN_TPL || []).map(([it, en]) => [new RegExp("^" + it.split("{}").map((x) => x.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&")).join("(.+?)") + "$", "s"), en]);
 let lang = "it";
 try { lang = localStorage.getItem("orpheus-lingua") === "en" ? "en" : "it"; } catch (e) { lang = "it"; }
+/* texts changed by the user ("Modifica i testi", file testi_cruscotto.json in the data folder): Italian only */
+let IT_OVR = {}, IT_REV = new Map();
+function setOverrides(d) { IT_OVR = d || {}; IT_REV = new Map(Object.entries(IT_OVR).map(([k, v]) => [v, k])); }
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 function t(text, inner) {
-  if (lang !== "en" || typeof text !== "string" || !text) return text;
+  if (typeof text !== "string" || !text) return text;
+  if (lang !== "en") {
+    if (hasOwn(IT_OVR, text)) return IT_OVR[text];
+    const c = text.trim();
+    if (c !== text && hasOwn(IT_OVR, c)) return text.match(/^\s*/)[0] + IT_OVR[c] + text.match(/\s*$/)[0];
+    return text;
+  }
   if (Object.prototype.hasOwnProperty.call(EN, text)) return EN[text];
   const lead = text.match(/^\s*/)[0], trail = text.match(/\s*$/)[0], core = text.trim();
   if (core !== text && Object.prototype.hasOwnProperty.call(EN, core)) return lead + EN[core] + trail;
@@ -65,7 +76,10 @@ function setProps(node, props) {
 function append(node, kids) {
   for (const kid of kids.flat(Infinity)) {
     if (kid === undefined || kid === null || kid === false) continue;
-    node.append(kid instanceof Node ? kid : document.createTextNode(typeof kid === "string" ? t(kid) : String(kid)));
+    if (kid instanceof Node) { node.append(kid); continue; }
+    const tn = document.createTextNode(typeof kid === "string" ? t(kid) : String(kid));
+    if (typeof kid === "string") tn.__src = kid;           // the original text, for "Modifica i testi"
+    node.append(tn);
   }
 }
 function put(node, ...kids) { node.replaceChildren(); append(node, kids); return node; }
@@ -100,12 +114,94 @@ async function get(path, fresh = false) {
 }
 function clearCache() { cache.clear(); }
 function colorFor(sigla) { return journalColors.get(sigla) || "var(--s-other)"; }
-function setJournals(siglas) {
-  /* colours follow the journal, never its rank: the order is the one of the journal list (riviste_prioritarie.csv) */
-  const sorted = [...new Set(siglas.filter(Boolean))].sort();
-  journalColors = new Map(sorted.slice(0, 5).map((sg, i) => [sg, `var(--s${i + 1})`]));
+const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#d9a400", "#d55181", "#7b5bd6", "#159eb5", "#a0522d", "#5d8a1f", "#c2185b",
+  "#3f51b5", "#ef8f00"];
+const COLORS_KEY = "orpheus-colori-riviste";
+function setJournals(siglas, counts) {
+  /* every journal has its own colour and keeps it (saved in this browser): the first time, the journals with more
+     articles get the 12 most distinct colours, the others hues spread around the circle */
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(COLORS_KEY) || "{}") || {}; } catch (e) { saved = {}; }
+  const n = counts || {};
+  const order = [...new Set(siglas.filter(Boolean))].sort((a, b) => (n[b] || 0) - (n[a] || 0) || a.localeCompare(b));
+  const used = new Set(Object.values(saved));
+  let k = 0;
+  const next = () => {
+    for (;;) {
+      const c = k < PALETTE.length ? PALETTE[k] : `hsl(${Math.round(((k - PALETTE.length) * 137.508 + 20) % 360)} 55% ${k % 2 ? 40 : 52}%)`;
+      k++;
+      if (!used.has(c)) { used.add(c); return c; }
+    }
+  };
+  for (const sg of order) if (!saved[sg]) saved[sg] = next();
+  journalColors = new Map(order.map((sg) => [sg, saved[sg]]));
+  try { localStorage.setItem(COLORS_KEY, JSON.stringify(saved)); } catch (e) { /* not available */ }
 }
 function jname(sigla) { return journalNames.get(sigla) || null; }
+/* full name + abbreviation, everywhere a journal is listed */
+function jlabel(sigla) {
+  if (!sigla) return "—";
+  if (sigla === "altre") return t("altre riviste");
+  const name = jname(sigla);
+  return name && name !== sigla ? `${name} (${sigla})` : sigla;
+}
+function journalItems(siglas) {
+  return [...new Set(siglas.filter(Boolean))].map((sg) => ({value: sg, label: jlabel(sg), color: colorFor(sg)}))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+function loadSet(key, all, fallback) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    if (Array.isArray(saved)) return new Set(saved.filter((x) => all.includes(x)));
+  } catch (e) { /* storage not available */ }
+  return new Set(fallback());
+}
+function saveSet(key, set) { try { localStorage.setItem(key, JSON.stringify([...set])); } catch (e) { /* not available */ } }
+function plural(n, one, many) { return `${fmtN(n)} ${t(n === 1 ? one : many)}`; }
+
+/* drop-down list with multiple choice (riviste): one look in every section */
+function multiPick({label, items, selected, onChange}) {
+  const box = h("details", {class: "mpick"});
+  const sum = h("summary", {class: "mpick-sum"});
+  const list = h("div", {class: "mpick-list", role: "group", "aria-label": label});
+  let q = "";
+  const text = () => {
+    const n = selected.size;
+    if (!n) return t("Nessuna scelta");
+    if (n === items.length) return `${t("Tutte")} (${fmtN(n)})`;
+    if (n <= 2) return items.filter((i) => selected.has(i.value)).map((i) => i.value).join(", ");
+    return `${fmtN(n)} ${t("scelte su")} ${fmtN(items.length)}`;
+  };
+  const changed = () => { put(sum, h("span", {class: "sr-only"}, `${label}: `), h("span", {class: "mpick-lab"}, text()), h("span", {class: "mpick-caret", "aria-hidden": "true"})); onChange(selected); };
+  const render = () => {
+    const qq = q.trim().toLowerCase();
+    const shown = items.filter((i) => !qq || `${i.value} ${i.label}`.toLowerCase().includes(qq));
+    put(list, shown.length ? shown.map((i) => {
+      const cb = h("input", {type: "checkbox", checked: selected.has(i.value) || null,
+        onchange: () => { if (cb.checked) selected.add(i.value); else selected.delete(i.value); changed(); }});
+      return h("label", {class: "mpick-item"}, cb, i.color ? h("span", {class: "sw", style: `background:${i.color}`, "aria-hidden": "true"}) : null,
+        h("span", null, i.label));
+    }) : h("p", {class: "empty"}, "Nessuna rivista con questo nome."));
+  };
+  const all = (on) => { items.forEach((i) => (on ? selected.add(i.value) : selected.delete(i.value))); render(); changed(); };
+  box.append(sum, h("div", {class: "mpick-pop"},
+    h("div", {class: "mpick-tools"},
+      items.length > 8 ? h("input", {type: "search", placeholder: "Cerca per nome o sigla", "aria-label": "Cerca una rivista",
+        oninput: (e) => { q = e.target.value; render(); }}) : null,
+      h("button", {type: "button", class: "btn small", onclick: () => all(true)}, "Tutte"),
+      h("button", {type: "button", class: "btn small", onclick: () => all(false)}, "Nessuna")),
+    list));
+  put(sum, h("span", {class: "sr-only"}, `${label}: `), h("span", {class: "mpick-lab"}, text()), h("span", {class: "mpick-caret", "aria-hidden": "true"}));
+  render();
+  return box;
+}
+document.addEventListener("click", (e) => {
+  for (const d of document.querySelectorAll("details.mpick[open]")) if (!d.contains(e.target)) d.open = false;
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  for (const d of document.querySelectorAll("details.mpick[open]")) { d.open = false; d.querySelector("summary").focus(); }
+});
 /* the abbreviation of a journal, with its full name shown after one second on the pointer (or on keyboard focus) */
 function sgl(sigla, strong) {
   const name = jname(sigla);
@@ -127,9 +223,15 @@ const FIELD = {
   risultato_chiave: "Risultato chiave", limite: "Limite", conclusione_autori: "Conclusione degli autori",
 };
 function loading(text) { return h("p", {class: "loading"}, text || "Lettura del database…"); }
-function errorBox(err) { return h("div", {class: "error", role: "alert"}, `Non riesco a leggere i dati: ${err.message}. Controlla che il disco esterno sia collegato, poi aggiorna la pagina.`); }
+function errorBox(err) {
+  const msg = String(err.message || err).replace(/\.$/, "");
+  const disk = /disco esterno|database non trovato/.test(msg);
+  return h("div", {class: "error", role: "alert"}, `Non riesco a leggere i dati: ${msg}. ` + (disk
+    ? "Controlla che il disco esterno sia collegato, poi aggiorna la pagina."
+    : "Aggiorna la pagina; se l'errore resta, chiudi e riapri il cruscotto."));
+}
 function head(title, lede, actions) {
-  return [h("div", {class: "view-head"}, h("h1", {tabindex: "-1"}, t(title)), actions || null),
+  return [h("div", {class: "view-head"}, h("h1", {tabindex: "-1"}, title), actions || null),
           lede ? h("p", {class: "lede"}, lede) : null];
 }
 function refreshButton(onClick) {
@@ -196,7 +298,8 @@ function stackedBars(holder, categories, series, opts) {
     const step = Math.max(1, Math.ceil(categories.length / Math.floor(iw / 44)));
     categories.forEach((c, i) => {
       const cx = m.l + band * i + band / 2;
-      if (i % step === 0 || i === categories.length - 1) axis.append(s("text", {x: cx, y: H - 6, "text-anchor": "middle"}, String(c)));
+      const lastI = categories.length - 1;        // the last label always, the regular ones not too close to it
+      if (i === lastI || (i % step === 0 && lastI - i >= Math.ceil(step * 0.6))) axis.append(s("text", {x: cx, y: H - 6, "text-anchor": "middle"}, String(c)));
       let acc = 0;
       const parts = series.map((sr) => ({sr, v: sr.values[i] || 0})).filter((p) => p.v > 0);
       parts.forEach((p, j) => {
@@ -226,7 +329,9 @@ function stackedBars(holder, categories, series, opts) {
     put(holder, svg);
   };
   draw();
-  new ResizeObserver(debounce(draw, 120)).observe(holder);
+  if (holder._ro) holder._ro.disconnect();
+  holder._ro = new ResizeObserver(debounce(() => { if (document.contains(holder)) draw(); else holder._ro.disconnect(); }, 120));
+  holder._ro.observe(holder);
 }
 function hbars(rows, total) {
   const box = h("div", {class: "hbars"});
@@ -291,7 +396,8 @@ async function actionsInfo(fresh) {
 function actionPanel(info, key, opts = {}) {
   const a = info.azioni.find((x) => x.azione === key);
   if (!a) return null;
-  const box = h("section", {class: "block action", "aria-label": a.titolo});
+  const title = opts.title || a.titolo;
+  const box = h("section", {class: "block action", id: `act-${key}`, "aria-label": title});
   const stateLine = h("div", {class: "state-line"});
   const consoleBox = h("pre", {class: "console", hidden: true, "aria-label": `Avanzamento: ${a.titolo}`});
   const mine = info.avvio.azione === key && (info.avvio.in_corso || info.avvio.prossima);
@@ -324,8 +430,8 @@ function actionPanel(info, key, opts = {}) {
   if (!info.avvio.disponibile) why = "Per avviare da qui apri il cruscotto con cruscotto.cmd (in C:\\ORPHEUS).";
   else if (busyOther) why = `Adesso è in corso: ${info.avvio.titolo}. Aspetta che finisca.`;
   else if (busyPc) why = `lavora è già in corso in un'altra finestra (dal ${fmtDate(info.in_corso_sul_pc.iniziato)}).`;
-  append(box, [h("div", {class: "block-head"}, h("h2", null, a.titolo), stateLine),
-    h("p", {class: "muted"}, a.descrizione),
+  append(box, [h("div", {class: "block-head"}, h("h2", null, title), stateLine),
+    h("p", {class: "muted"}, opts.desc || a.descrizione),
     opts.controls || null,
     h("div", {class: "action-row"}, startBtn, h("details", {class: "action-more"}, h("summary", null, `${a.passi.length} passi, in ordine`), steps)),
     why ? h("p", {class: "muted"}, why) : null, confirmBox, consoleBox,
@@ -341,88 +447,65 @@ async function actionBlock(key, opts) {
 
 const sections = {};
 
+const YEARS_KEY = "orpheus-panoramica-riviste";
 sections.panoramica = async () => {
+  const view = liveView;
   const d = await get("/api/panoramica");
-  const out = [];
-  out.push(...head("Panoramica", "Lo stato di ORPHEUS sul disco collegato: dai PDF letti alle affermazioni con le loro prove.",
-    refreshButton(() => { clearCache(); route(); })));
+  const out = [...head("Panoramica", null, refreshButton(() => { clearCache(); route(); }))];
 
-  const chain = h("div", {class: "chain"});
-  const max = Math.max(...d.catena.map((c) => c.valore || 0), 1);
-  for (const c of d.catena) {
-    chain.append(h("button", {type: "button", class: "chain-step", onclick: () => go(c.vai),
-      title: `Fonte: ${c.fonte}. Dati al ${fmtDate(c.data) || "—"}.`},
-      h("span", {class: "chain-val"}, fmtN(c.valore)),
-      h("span", {class: "chain-lab"}, c.etichetta),
-      h("span", {class: "chain-note"}, c.nota || ""),
-      h("span", {class: "chain-bar", "aria-hidden": "true"}, h("i", {style: `width:${((c.valore || 0) / max) * 100}%`}))));
-  }
-  const newest = d.catena.map((c) => c.data).filter(Boolean).sort().pop();
-  out.push(h("section", {class: "block", "aria-labelledby": "h-chain"},
-    h("div", {class: "block-head"}, h("h2", {id: "h-chain"}, "Articoli scientifici"),
-      h("span", {class: "muted"}, "i passi di lavora, in ordine; clic per aprire")),
-    chain,
-    srcLine({fonte: "document, doi_check, pubmed_check, segment, article_card, scientific_claim", data: newest})));
-
-  try {
-    const info = await actionsInfo(true);
-    out.push(h("section", {class: "block", "aria-labelledby": "h-act"},
-      h("div", {class: "block-head"}, h("h2", {id: "h-act"}, "Funzioni di ORPHEUS"),
-        h("span", {class: "muted"}, "ogni pulsante apre la sezione con il suo comando")),
-      h("ol", {class: "flow"}, info.azioni.map((a) => h("li", null, h("button", {type: "button", class: "flow-step", onclick: () => go(a.sezione)},
-        h("span", {class: "flow-t"}, a.titolo), h("span", {class: "flow-n"}, `${a.passi.length} passi · ${a.comando}`),
-        info.avvio.in_corso && info.avvio.azione === a.azione ? tag("in corso", "acc") : null))))));
-  } catch (e) { /* the overview still shows the rest */ }
-  const kpis = h("div", {class: "kpis"});
-  for (const k of d.kpi) {
-    kpis.append(h("button", {type: "button", class: "kpi", onclick: () => go(k.vai), title: `Fonte: ${k.fonte}`},
-      h("div", {class: "kpi-v"}, fmtN(k.valore), k.totale ? h("small", null, ` su ${fmtN(k.totale)}`) : null),
-      h("div", {class: "kpi-l"}, k.etichetta),
-      h("div", {class: "kpi-n"}, [k.nota, k.data ? `dati al ${fmtDate(k.data, false)}` : null].filter(Boolean).join("; "))));
-  }
-  out.push(kpis);
-
-  const todo = h("ul", {class: "notes"});
-  for (const a of d.avvisi.righe) {
-    todo.append(h("li", null, tag(a.tipo, a.tipo === "lavora" ? "warn" : "acc"),
-      h("button", {type: "button", class: "linklike", onclick: () => go(a.vai)}, a.testo)));
-  }
-  for (const x of d.lavori.per_claude) {
-    todo.append(h("li", null, tag("per Claude"), h("span", null, `${x.lavoro}: ${fmtN(x.quanti)}`)));
-  }
-  if (!todo.children.length) todo.append(h("li", null, h("span", {class: "empty"}, "Niente da fare: è tutto aggiornato.")));
-  const last = d.ultimo_lavora;
-  const yearsHolder = h("div");
-  const byYear = d.per_anno.righe;
-  const years = [];
-  const yMin = Math.min(...byYear.map((r) => r.anno)), yMax = Math.max(...byYear.map((r) => r.anno));
-  for (let y = yMin; y <= yMax; y++) years.push(y);
-  const names = [...new Set(byYear.map((r) => r.rivista))].sort((a, b) => (a === "altre") - (b === "altre") || a.localeCompare(b));
-  const series = names.map((n) => ({name: n, color: colorFor(n),
-    values: years.map((y) => (byYear.find((r) => r.anno === y && r.rivista === n) || {}).n || 0)}));
-  const yearTable = h("table", null, h("thead", null, h("tr", null, h("th", null, "Anno"), names.map((n) => h("th", {class: "n"}, n)))),
-    h("tbody", null, years.filter((y, i) => series.some((sr) => sr.values[i])).map((y) => h("tr", null, h("td", null, String(y)),
-      names.map((n, j) => h("td", {class: "n"}, fmtN(series[j].values[years.indexOf(y)])))))));
-  out.push(h("div", {class: "cols"},
-    h("section", {class: "block", "aria-labelledby": "h-todo"},
-      h("div", {class: "block-head"}, h("h2", {id: "h-todo"}, "Da guardare"),
-        last ? h("span", {class: "muted"}, `ultimo lavora: ${fmtDate(last.finito || last.iniziato)}`) : null),
-      todo, srcLine(d.avvisi)),
-    h("section", {class: "block", "aria-labelledby": "h-years"},
-      h("div", {class: "block-head"}, h("h2", {id: "h-years"}, "Articoli per anno di pubblicazione")),
-      h("ul", {class: "legend"}, names.map((n) => h("li", {"data-jname": jname(n)}, swatch(n), n))),
-      yearsHolder,
-      h("details", null, h("summary", null, "Mostra come tabella"), h("div", {class: "table-wrap"}, yearTable)),
-      srcLine(d.per_anno))));
-  out.push(h("section", {class: "block module-card", "aria-labelledby": "h-eur"},
-    h("h2", {id: "h-eur"}, "Revisioni sistematiche e meta-analisi"),
-    h("p", {class: "muted"}, "Il secondo modulo: controlla e conduci una revisione."),
-    h("button", {type: "button", class: "btn module", onclick: () => go("eurydike/panoramica")}, "Apri EURYDIKE")));
-
+  /* 1. the two numbers that matter: articles in ORPHEUS and journals covered */
+  const art = d.kpi.find((k) => k.id === "articoli") || {};
   const cov = d.copertura.righe;
+  const listed = cov.filter((r) => journalNames.has(r.rivista));
+  const covered = listed.filter((r) => r.articoli > 0).length;
+  const stat = (value, label, note, sec) => h("button", {type: "button", class: "stat", onclick: () => go(sec)},
+    h("span", {class: "stat-v"}, fmtN(value)), h("span", {class: "stat-l"}, label), note ? h("span", {class: "stat-n"}, note) : null);
+  out.push(h("section", {class: "block stats", "aria-label": "Numeri principali", "data-block": "Numeri principali"},
+    stat(art.valore, "Articoli", art.nota || null, "articoli"),
+    stat(covered, "Riviste", `con almeno un articolo, su ${fmtN(listed.length)} nell'elenco`, "riviste")));
+
+  /* 2. articles by year of publication, only for the journals chosen */
+  const byYear = d.per_anno.righe;
+  const totals = new Map();
+  for (const r of byYear) totals.set(r.rivista, (totals.get(r.rivista) || 0) + r.n);
+  const names = [...totals.keys()];
+  const top = () => names.filter((n) => n !== "altre").sort((a, b) => totals.get(b) - totals.get(a)).slice(0, 5);
+  const pick = loadSet(YEARS_KEY, names, top);
+  const years = [];
+  if (byYear.length) {
+    const yMin = Math.min(...byYear.map((r) => r.anno)), yMax = Math.max(...byYear.map((r) => r.anno));
+    for (let y = yMin; y <= yMax; y++) years.push(y);
+  }
+  const value = (n, y) => (byYear.find((r) => r.anno === y && r.rivista === n) || {}).n || 0;
+  const yearsHolder = h("div"), legendBox = h("ul", {class: "legend"}), tableBox = h("div", {class: "table-wrap"});
+  const drawYears = () => {
+    const shown = names.filter((n) => pick.has(n)).sort((a, b) => totals.get(b) - totals.get(a));
+    const series = shown.map((n) => ({name: jlabel(n), color: colorFor(n), values: years.map((y) => value(n, y))}));
+    put(legendBox, shown.map((n) => h("li", null, swatch(n), `${jlabel(n)} · ${fmtN(totals.get(n))}`)));
+    put(tableBox, h("table", null, h("thead", null, h("tr", null, h("th", {scope: "col"}, "Anno"),
+      shown.map((n) => h("th", {class: "n", scope: "col", title: jlabel(n)}, n === "altre" ? t("altre") : n)))),
+      h("tbody", null, years.filter((y, i) => series.some((sr) => sr.values[i])).map((y) => h("tr", null, h("td", null, String(y)),
+        series.map((sr) => h("td", {class: "n"}, fmtN(sr.values[years.indexOf(y)]))))))));
+    if (!shown.length || !years.length) {
+      if (yearsHolder._ro) yearsHolder._ro.disconnect();
+      put(yearsHolder, h("p", {class: "empty"}, years.length ? "Scegli almeno una rivista." : "Nessun articolo con l'anno di pubblicazione."));
+    } else stackedBars(yearsHolder, years, series, {label: "Articoli per anno e rivista", unit: "articoli", height: 230});
+  };
+  out.push(h("section", {class: "block", "aria-labelledby": "h-years"},
+    h("div", {class: "block-head"}, h("h2", {id: "h-years"}, "Articoli e riviste"),
+      multiPick({label: "Riviste nel grafico", items: names.map((n) => ({value: n, label: jlabel(n), color: colorFor(n)}))
+        .sort((a, b) => (a.value === "altre") - (b.value === "altre") || a.label.localeCompare(b.label)),
+        selected: pick, onChange: () => { saveSet(YEARS_KEY, pick); drawYears(); }})),
+    h("p", {class: "muted"}, "Articoli per anno di pubblicazione: un colore per rivista. Scegli le riviste dall'elenco."),
+    legendBox, yearsHolder,
+    h("details", null, h("summary", null, "Mostra come tabella"), tableBox),
+    srcLine(d.per_anno)));
+
+  /* 3. coverage by journal: full name and abbreviation, one colour each */
   const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
   const covCols = [
-    {key: "rivista", label: "Rivista", sort: true, cell: (r) => h("span", {class: "chip-like"}, swatch(r.rivista), " ", sgl(r.rivista))},
+    {key: "rivista", label: "Rivista", sort: true, value: (r) => jlabel(r.rivista).toLowerCase(),
+      cell: (r) => h("span", {class: "jcell"}, swatch(r.rivista), h("span", null, jlabel(r.rivista)))},
     {key: "articoli", label: "Articoli", num: true, sort: true, cell: (r) => fmtN(r.articoli)},
     {key: "articoli_completi", label: "Completi", num: true, sort: true, cell: (r) => fmtN(r.articoli_completi)},
     {key: "doi_confermato", label: "DOI confermato", num: true, sort: true, cell: (r) => fmtN(r.doi_confermato)},
@@ -440,8 +523,8 @@ sections.panoramica = async () => {
   renderCov();
   out.push(h("section", {class: "block", "aria-labelledby": "h-cov"},
     h("div", {class: "block-head"}, h("h2", {id: "h-cov"}, "Copertura per rivista")), covHolder, srcLine(d.copertura)));
-  put(view, ...out.flat());
-  stackedBars(yearsHolder, years, series, {label: "Articoli per anno e rivista", unit: "articoli", height: 210});
+  put(view, ...out);
+  drawYears();
 };
 
 /* articles */
@@ -449,6 +532,7 @@ const artState = {q: "", riviste: new Set(), da: null, a: null, flags: new Set()
 const FLAGS = [["completo", "Completi"], ["scheda", "Con scheda"], ["affermazioni", "Con affermazioni"],
   ["pubmed", "In PubMed"], ["testo_aperto", "Testo aperto"]];
 sections.articoli = async () => {
+  const view = liveView;
   const d = await get("/api/articoli");
   const rows = d.righe;
   const siglas = [...new Set(rows.map((r) => r.rivista).filter(Boolean))].sort();
@@ -456,7 +540,7 @@ sections.articoli = async () => {
   const cols = [
     {key: "titolo", label: "Articolo", sort: true, value: (r) => (r.titolo || "").toLowerCase(),
       cell: (r) => [h("div", {class: "t-title"}, r.titolo || "(senza titolo)"), h("div", {class: "t-sub"}, authorLine(r))]},
-    {key: "rivista", label: "Rivista", sort: true, cell: (r) => r.rivista ? [swatch(r.rivista), " ", sgl(r.rivista)] : "—"},
+    {key: "rivista", label: "Rivista", sort: true, cell: (r) => r.rivista ? h("span", {class: "jcell"}, swatch(r.rivista), sgl(r.rivista)) : "—"},
     {key: "anno", label: "Anno", num: true, sort: true, cell: (r) => r.anno || "—"},
     {key: "completo", label: "Completo", sort: true, cell: (r) => yesNo(r.completo)},
     {key: "pubmed", label: "PubMed", sort: true, cell: (r) => yesNo(r.pubmed)},
@@ -493,13 +577,8 @@ sections.articoli = async () => {
     h("label", {class: "field"}, "Cerca nel titolo, DOI, autori, PMID",
       h("input", {type: "search", value: artState.q, placeholder: "es. hamstring, 10.1111/sms…",
         oninput: debounce((e) => { artState.q = e.target.value; artState.limit = 60; render(); }, 150)})),
-    h("div", {class: "field"}, "Rivista", h("div", {class: "checks"}, siglas.map((sg) => {
-      const b = chip(sg, artState.riviste.has(sg), () => {
-        artState.riviste.has(sg) ? artState.riviste.delete(sg) : artState.riviste.add(sg);
-        b.setAttribute("aria-pressed", String(artState.riviste.has(sg))); artState.limit = 60; render();
-      }, swatch(sg));
-      return b;
-    }))),
+    h("div", {class: "field"}, "Riviste", multiPick({label: "Riviste", items: journalItems(siglas), selected: artState.riviste,
+      onChange: () => { artState.limit = 60; render(); }})),
     h("label", {class: "field"}, "Dal", h("input", {type: "number", value: artState.da || "", min: 1900, max: 2100, placeholder: "anno",
       oninput: debounce((e) => { artState.da = +e.target.value || null; render(); }, 250)})),
     h("label", {class: "field"}, "Al", h("input", {type: "number", value: artState.a || "", min: 1900, max: 2100, placeholder: "anno",
@@ -511,20 +590,17 @@ sections.articoli = async () => {
       });
       return b;
     }))));
-  put(view, ...head("Articoli", "Tutti gli articoli nel database. Filtra, ordina con un clic sulle colonne, apri un articolo per vedere scheda, affermazioni e verifiche.",
-    refreshButton(() => { clearCache(); route(); })), await actionBlock("aggiorna_articoli"), await unassignedBlock(),
-    ...(await cardsBlocks()), filters, holder, srcLine(d));
+  put(view, ...head("Articoli", null, refreshButton(() => { clearCache(); route(); })),
+    h("section", {class: "block", "data-block": "Elenco degli articoli"}, filters, holder), srcLine(d));
   render();
 };
 
 /* article cards (2026-10-17 19:13): packets by priority; Claude in session is the main route, the free chat the emergency one */
-async function cardsBlocks() {
-  let info;
-  try { info = await actionsInfo(true); } catch (e) { return []; }
+function cardsBlocks(info) {
   const mode = h("select", {"aria-label": "Priorità dei pacchetti"},
     h("option", {value: "rivista"}, "Una rivista"), h("option", {value: "equo"}, "Equo: lo stesso numero per rivista"),
     h("option", {value: "casuale", selected: true}, "Casuale: come il sorteggio"));
-  const journal = h("select", {"aria-label": "Rivista"}, (info.riviste || []).map((sg) => h("option", {value: sg}, sg)));
+  const journal = h("select", {"aria-label": "Rivista"}, journalItems(info.riviste || []).map((j) => h("option", {value: j.value}, j.label)));
   const journalField = h("label", {class: "field", hidden: true}, "Rivista", journal);
   mode.addEventListener("change", () => { journalField.hidden = mode.value !== "rivista"; });
   const howMany = h("input", {type: "number", min: 1, max: 100, value: 10, "aria-label": "Quanti pacchetti nuovi"});
@@ -538,14 +614,14 @@ async function cardsBlocks() {
   const chatLine = c ? h("p", {class: "muted"}, `Chat gratuita: ${fmtN(c.preparati)} articoli preparati; accettate da inviare ${fmtN(c.da_inviare)}, già nel database ${fmtN(c.inviate)}, rifiutate ${fmtN(c.rifiutate)}, in attesa della risposta ${fmtN(c.in_attesa + c.da_leggere)}.`) : null;
   const send = actionPanel(info, "invia_schede_chat", {controls: chatLine});
   const chat = actionPanel(info, "chat_schede");
-  return [h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Schede degli articoli")),
-      h("p", {class: "muted"}, "Strada principale: Claude scrive le schede in sessione dai pacchetti, poi \"Invia il lavoro di Claude\" (sezione Affermazioni). Emergenza, per pochi articoli o quando Claude non può lavorare: una chat gratuita, poi \"Invia le schede della chat\".")),
+  return [h("p", {class: "muted group-note"}, "Strada principale: Claude scrive le schede in sessione dai pacchetti, poi «Invia il lavoro di Claude» (sezione Consenso). Emergenza, per pochi articoli o quando Claude non può lavorare: una chat gratuita, poi «Invia le schede della chat»."),
     packets, chat, send].filter(Boolean);
 }
 
 /* claims */
 const clState = {q: "", livello: "tutti", tipo: "tutti", controllo: "tutte", riviste: new Set(), limit: 40};
 sections.affermazioni = async () => {
+  const view = liveView;
   const d = await get("/api/affermazioni");
   const rows = d.righe;
   const siglas = [...new Set(rows.map((r) => r.rivista).filter(Boolean))].sort();
@@ -607,6 +683,7 @@ const srState = {q: "", modo: "ibrida", result: null};
 const EXAMPLES = ["ACL injuries in female football players", "running economy with minimalist shoes",
   "bowling workload and lumbar stress injuries in young cricketers", "hamstring strain and sprint mechanics"];
 sections.ricerca = async () => {
+  const view = liveView;
   const input = h("input", {type: "search", value: srState.q, "aria-label": "Domanda", placeholder: "Write a question or a statement in English", lang: "en"});
   const results = h("div", {"aria-live": "polite"});
   const run = async (q) => {
@@ -656,11 +733,12 @@ const RULES = [["tipo", "Tipo di articolo"], ["parole_testo_max", "Parole del te
   ["abstract_struttura", "Struttura dell'abstract"], ["riferimenti_max", "Riferimenti (massimo)"], ["figure_tabelle_max", "Figure e tabelle (massimo)"],
   ["preprint", "Preprint"], ["politica_ia", "Uso dell'intelligenza artificiale"], ["revisione", "Revisione"], ["orcid", "ORCID"], ["dati", "Dati"]];
 sections.riviste = async () => {
+  const view = liveView;
   const d = await get("/api/riviste");
   const maxSjr = Math.max(...d.riviste.map((r) => (r.metriche && r.metriche.sjr) || 0), 1);
   const cols = [
-    {key: "sigla", label: "Rivista", sort: true, cell: (r) => [h("div", null, swatch(r.sigla), " ", sgl(r.sigla, true)),
-      h("div", {class: "t-sub"}, `${r.titolo}${r.editore ? `, ${r.editore}` : ""}`)]},
+    {key: "sigla", label: "Rivista", sort: true, value: (r) => jlabel(r.sigla).toLowerCase(),
+      cell: (r) => [h("div", {class: "jcell"}, swatch(r.sigla), h("b", null, jlabel(r.sigla))), r.editore ? h("div", {class: "t-sub"}, r.editore) : null]},
     {key: "sjr", label: "SJR", num: true, sort: true, value: (r) => r.metriche && r.metriche.sjr,
       cell: (r) => r.metriche && r.metriche.sjr != null ? h("span", {class: "bar-cell"}, fmtN(r.metriche.sjr),
         h("span", {class: "mini", "aria-hidden": "true"}, h("i", {style: `width:${(r.metriche.sjr / maxSjr) * 100}%`}))) : "—"},
@@ -676,8 +754,7 @@ sections.riviste = async () => {
   const all = d.riviste.map((r) => r.sigla).filter(Boolean).sort();
   const pick = loadPick(all, d.riviste);
   const st = {sort: "sjr", dir: -1};
-  const holder = h("div"), confHolder = h("div"), pickHolder = h("div");
-  let pickFilter = "";
+  const holder = h("div"), confHolder = h("div");
   const renderTables = () => {
     const rows = d.riviste.filter((r) => pick.has(r.sigla));
     put(holder, rows.length ? sortableTable(cols, sortRows(rows, st, cols), {state: st, rerender: renderTables})
@@ -688,55 +765,26 @@ sections.riviste = async () => {
       h("tbody", null, RULES.map(([k, label]) => h("tr", null, h("th", {scope: "row"}, label), conf.map((c) => h("td", null, c[k] || "—")))))))
       : h("p", {class: "empty"}, d.confronto.righe.length ? "Nessuna delle riviste scelte ha una scheda." : "Nessuna scheda delle riviste."));
   };
-  const renderPick = () => {
-    const q = pickFilter.trim().toLowerCase();
-    const shown = d.riviste.filter((r) => r.sigla && (!q || `${r.sigla} ${r.titolo}`.toLowerCase().includes(q)))
-      .sort((a, b) => a.sigla.localeCompare(b.sigla));
-    put(pickHolder,
-      h("div", {class: "filters"},
-        all.length > 8 ? h("label", {class: "field"}, "Cerca una rivista", h("input", {type: "search", value: pickFilter,
-          placeholder: "sigla o nome", oninput: debounce((e) => { pickFilter = e.target.value; renderPick(); }, 150)})) : null,
-        h("div", {class: "field"}, `Scelte ${pick.size} di ${all.length}`, h("div", {class: "checks"},
-          h("button", {type: "button", class: "btn", onclick: () => { all.forEach((x) => pick.add(x)); savePick(pick); renderPick(); renderTables(); }}, "Tutte"),
-          h("button", {type: "button", class: "btn", onclick: () => { pick.clear(); savePick(pick); renderPick(); renderTables(); }}, "Nessuna")))),
-      h("div", {class: "checks"}, shown.map((r) => chip(r.sigla, pick.has(r.sigla), () => {
-        pick.has(r.sigla) ? pick.delete(r.sigla) : pick.add(r.sigla);
-        savePick(pick); renderPick(); renderTables();
-      }, swatch(r.sigla)))));
-  };
-  renderPick();
   renderTables();
-  put(view, ...head("Riviste", "Le riviste dell'elenco: metriche ufficiali con anno e fornitore, linee guida (data più recente) e regole per gli autori lette dalle schede. Scegli quali mettere a confronto.",
-    refreshButton(() => { clearCache(); route(); })), await actionBlock("aggiorna_riviste"), await journalListBlock(),
-    journalCardBlock(d.riviste),
+  put(view, ...head("Riviste", null, refreshButton(() => { clearCache(); route(); })), await journalListBlock(d.riviste),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Riviste da confrontare"),
-      h("span", {class: "muted"}, "la scelta resta salvata in questo browser")), pickHolder),
+      multiPick({label: "Riviste da confrontare", items: journalItems(all), selected: pick,
+        onChange: () => { savePick(pick); renderTables(); }})),
+      h("p", {class: "muted"}, "Le tabelle qui sotto mostrano solo le riviste scelte. La scelta resta salvata in questo browser.")),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Metriche e linee guida")), holder,
       srcLine(d.metriche, "SJR e quartile: SCImago 2025. h-index: prima SCImago, poi OpenAlex.")),
     h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Regole per gli autori a confronto"),
       h("span", {class: "muted"}, "primo tipo di articolo di ogni scheda")), confHolder, srcLine(d.confronto)),
-    await journalProfileBlock(),
-    h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Avvisi sulle linee guida")),
-      d.avvisi.righe.length ? h("ul", {class: "notes"}, d.avvisi.righe.map((a) => h("li", null, tag("da rifare", "warn"), a)))
-        : h("p", {class: "empty"}, "Nessun avviso: le schede delle riviste sono sulle linee guida più recenti."), srcLine(d.avvisi)));
+    await journalProfileBlock());
 };
 /* T-052: the card of a journal — values from the guideline PDF (page) and values written by hand (source and date,
    migration 0019). Correcting = a new row, the old one stays in the history; "Togli" goes back to the PDF value. */
-const JCARD_KEY = "orpheus-scheda-rivista";
-function journalCardBlock(riviste) {
-  const box = h("section", {class: "block", "aria-labelledby": "h-jcard"});
-  const title = h("div", {class: "block-head"}, h("h2", {id: "h-jcard"}, "Scheda della rivista: correggi o aggiungi a mano"),
-    h("span", {class: "muted"}, "anche per le riviste senza PDF delle linee guida"));
-  const rows = riviste.filter((r) => r.id).sort((a, b) => String(a.sigla || a.titolo).localeCompare(String(b.sigla || b.titolo)));
-  if (!rows.length) return put(box, title, h("p", {class: "empty"}, "Nessuna rivista nel database."));
-  let pick = null;
-  try { pick = localStorage.getItem(JCARD_KEY); } catch (e) { /* storage not available */ }
-  if (!rows.some((r) => r.id === pick)) pick = rows[0].id;
+function journalCardEditor(pick, label, onClose) {
+  const box = h("section", {class: "jform jcard", "aria-label": `${t("Scheda di")} ${label}`});
+  const title = h("div", {class: "block-head"}, h("h3", null, `${t("Scheda di")} ${label}`),
+    h("button", {type: "button", class: "btn small", onclick: onClose}, "Chiudi"));
   const holder = h("div"), formBox = h("div");
   const msg = h("p", {class: "muted", role: "status"});
-  const sel = h("select", {"aria-label": t("Rivista"), onchange: (e) => {
-    pick = e.target.value; try { localStorage.setItem(JCARD_KEY, pick); } catch (err) { /* ignore */ } load(); }},
-    rows.map((r) => h("option", {value: r.id, selected: r.id === pick ? true : null}, r.sigla ? `${r.sigla} — ${r.titolo}` : r.titolo)));
   const today = () => { const n = new Date(); return new Date(n.getTime() - n.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
   const origin = (v) => v.origin === "manual" ? [tag(t("a mano"), "acc"), " ", h("span", {class: "t-sub"}, `${v.source} · ${t("letto il")} ${v.read_on}`)]
     : v.manual_id ? [tag(t("a mano"), "acc"), " ", h("span", {class: "t-sub"}, `${t("non indicato dalla rivista")} · ${v.source} · ${v.read_on}`)]
@@ -823,7 +871,9 @@ function journalCardBlock(riviste) {
       msg);
   };
   load();
-  return put(box, title, h("div", {class: "filters"}, h("label", {class: "field"}, t("Rivista"), sel)), holder);
+  put(box, title, h("p", {class: "t-sub"}, "Valori dal PDF delle linee guida e valori scritti a mano (anche per le riviste senza PDF): «Correggi» o «Aggiungi un valore»."), holder);
+  setTimeout(() => box.scrollIntoView({behavior: "smooth", block: "nearest"}), 0);
+  return box;
 }
 /* T-057: profile of a journal from its published articles (stats-terms-v1): what they report about statistics,
    transparency and structure; always N and the fixed warning; a count opens the sentences behind it. */
@@ -962,13 +1012,17 @@ const JCOLS = [["sigla", "Sigla", "es. JSAMS (lettere, numeri, - e _)"], ["titol
   ["issn_print", "ISSN stampa", "1234-567X"], ["issn_online", "ISSN online", "1234-567X"],
   ["sito_ufficiale", "Sito ufficiale", "https://…"], ["url_istruzioni_autori", "Istruzioni per gli autori", "https://…"],
   ["priorita", "Priorità", "facoltativa"], ["note", "Note", "facoltative"]];
-async function journalListBlock() {
+function issnLines(r) {
+  const list = [r.issn_print, r.issn_online].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i);
+  return list.length ? list.map((x, i) => [i ? h("br") : null, x]) : "—";
+}
+async function journalListBlock(riviste) {
+  const idBySigla = new Map((riviste || []).filter((r) => r.id && r.sigla).map((r) => [r.sigla.toLowerCase(), r.id]));
   let d;
   try { d = await get("/api/riviste/elenco"); } catch (e) { return h("section", {class: "block"}, errorBox(e)); }
   const box = h("section", {class: "block", "aria-labelledby": "h-jlist"});
   const formBox = h("div");
   const msg = h("p", {role: "status", class: "muted"});
-  const auto = d.righe.filter((r) => r.automatica);
   let filter = "", gFilter = "";
   const listBox = h("div");
   const GTAG = {scheda: "good", scheda_da_inviare: "acc", senza_scheda: "acc", scheda_da_rifare: "warn",
@@ -979,14 +1033,19 @@ async function journalListBlock() {
     const q = filter.trim().toLowerCase();
     const rows = d.righe.filter((r) => (!q || `${r.sigla} ${r.titolo} ${r.issn_print} ${r.issn_online}`.toLowerCase().includes(q))
       && (!gFilter || (r.linee_guida && r.linee_guida.stato === gFilter)));
-    put(listBox, rows.length ? h("div", {class: "table-wrap"}, h("table", null,
+    put(listBox, rows.length ? h("div", {class: "table-wrap tall"}, h("table", null,
       h("thead", null, h("tr", null, ["Sigla", "Titolo", "ISSN", "Linee guida e scheda", "Stato", ""].map((x) => h("th", {scope: "col"}, x)))),
       h("tbody", null, rows.map((r) => h("tr", null,
         h("td", null, h("b", null, r.sigla)), h("td", null, r.titolo),
-        h("td", null, [r.issn_print, r.issn_online].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(" · ") || "—"),
+        h("td", {class: "num nowrap"}, issnLines(r)),
         h("td", null, guideCell(r.linee_guida)),
         h("td", null, r.automatica ? tag("aggiunta automatica", "warn") : null, " ", r.nel_database ? null : tag("non ancora nel database")),
-        h("td", null, h("button", {type: "button", class: "btn small", onclick: () => openForm(r)}, "Modifica")))))))
+        h("td", null, h("div", {class: "card-actions"},
+          h("button", {type: "button", class: "btn small", onclick: () => openForm(r)}, "Modifica rivista"),
+          h("button", {type: "button", class: "btn small", disabled: !idBySigla.has(r.sigla.toLowerCase()) || null,
+            title: idBySigla.has(r.sigla.toLowerCase()) ? null : "La rivista non è ancora nel database: premi «Aggiorna le riviste» (Funzioni).",
+            onclick: () => put(formBox, journalCardEditor(idBySigla.get(r.sigla.toLowerCase()), r.titolo ? `${r.titolo} (${r.sigla})` : r.sigla,
+              () => formBox.replaceChildren()))}, "Modifica scheda"))))))))
       : h("p", {class: "empty"}, "Nessuna rivista con questo filtro."));
   };
   const openForm = (row) => {
@@ -1040,7 +1099,7 @@ async function journalListBlock() {
         formBox.replaceChildren(); renderList();
       } catch (err) { out.textContent = err.message; btn.disabled = false; }
     }},
-      h("h3", null, row ? `${t("Modifica")} ${row.sigla}` : t("Nuova rivista")),
+      h("h3", null, row ? `${t("Modifica rivista")} ${row.sigla}` : t("Nuova rivista")),
       h("div", {class: "form-grid"}, fieldsOut),
       h("div", {class: "action-row"}, fill, " ", h("button", {type: "submit", class: "btn primary"}, "Salva"), " ",
         h("button", {type: "button", class: "btn", onclick: () => formBox.replaceChildren()}, "Annulla")),
@@ -1058,10 +1117,6 @@ async function journalListBlock() {
     if (!gl) return null;
     const out = h("div");
     const list = (k) => gl.sigle[k].join(", ");
-    if (gl.conteggi.senza_linee_guida) out.append(h("p", {class: "notice"},
-      h("b", null, `${t("Per te")}: ${t("riviste senza PDF delle linee guida")} (${fmtN(gl.conteggi.senza_linee_guida)}). `),
-      `${list("senza_linee_guida")}. `,
-      t("Salva in PDF le istruzioni per gli autori (e, se ci sono, aims & scope e costi/APC) nella cartella inbox\\riviste\\<sigla>\\linee_guida di ogni rivista, poi «Aggiungi e verifica gli articoli nuovi».")));
     if (gl.conteggi.pdf_da_leggere) out.append(h("p", {class: "notice"},
       h("b", null, `${t("PDF delle linee guida da leggere")} (${fmtN(gl.conteggi.pdf_da_leggere)}). `),
       `${list("pdf_da_leggere")}. `, t("«Aggiungi e verifica gli articoli nuovi» li legge.")));
@@ -1075,8 +1130,6 @@ async function journalListBlock() {
   };
   put(box, h("div", {class: "block-head"}, h("h2", {id: "h-jlist"}, "Elenco delle riviste"),
       h("button", {type: "button", class: "btn primary", onclick: () => openForm(null)}, "Nuova rivista")),
-    auto.length ? h("p", {class: "notice"}, `${t("Riviste aggiunte in automatico dai PDF")}: ${auto.map((r) => r.sigla).join(", ")}. `
-      + t("La sigla è proposta dalle iniziali del titolo: cambiala con \"Modifica\" se vuoi.")) : null,
     guideNotes(),
     formBox, msg,
     h("div", {class: "filters"},
@@ -1151,6 +1204,7 @@ function countsBar(c, total) {
   return box;
 }
 sections.manoscritti = async () => {
+  const view = liveView;
   const d = await get("/api/manoscritti", true);
   const all = d.riviste.map((r) => r.sigla);
   if (!msState.riviste) {
@@ -1158,60 +1212,91 @@ sections.manoscritti = async () => {
     try { saved = JSON.parse(localStorage.getItem(MS_KEY) || "null"); } catch (e) { saved = null; }
     msState.riviste = new Set(Array.isArray(saved) ? saved.filter((x) => all.includes(x)) : all);
   }
-  if (!d.file.some((f) => f.nome === msState.file)) { msState.file = d.file.length ? d.file[0].nome : null; msState.result = null; }
-  const fileBox = h("div"), pickBox = h("div"), kindBox = h("div"), resultBox = h("div");
-  const renderFiles = () => put(fileBox, d.file.length ? h("ul", {class: "ms-files", role: "radiogroup", "aria-label": "Manoscritto"},
-    d.file.map((f) => h("li", null, h("label", null,
-      h("input", {type: "radio", name: "ms-file", value: f.nome, checked: f.nome === msState.file,
-        onchange: () => { msState.file = f.nome; msState.result = null; renderResult(); }}),
-      h("span", {class: "ms-name"}, f.nome), h("span", {class: "muted"}, ` ${fmtDate(f.modificato)}, ${fmtN(f.kb)} kB`)))))
-    : h("div", {class: "notice"}, `Nessun manoscritto. Copia il file Word (.docx) nella cartella ${d.cartella} e premi "Aggiorna i dati".`));
-  const renderPick = () => put(pickBox, h("div", {class: "filters"}, h("div", {class: "field"},
-      `Scelte ${msState.riviste.size} di ${all.length}`, h("div", {class: "checks"},
-      h("button", {type: "button", class: "btn", onclick: () => { all.forEach((x) => msState.riviste.add(x)); savePickMs(); renderPick(); }}, "Tutte"),
-      h("button", {type: "button", class: "btn", onclick: () => { msState.riviste.clear(); savePickMs(); renderPick(); }}, "Nessuna")))),
-    h("div", {class: "checks"}, d.riviste.map((r) => chip(r.sigla, msState.riviste.has(r.sigla), () => {
-      msState.riviste.has(r.sigla) ? msState.riviste.delete(r.sigla) : msState.riviste.add(r.sigla);
-      savePickMs(); renderPick();
-    }, swatch(r.sigla)))));
-  const renderKind = () => put(kindBox, seg([["auto", "Lo stima ORPHEUS"], ["originale", "Studio originale"],
-    ["revisione", "Revisione sistematica o meta-analisi"], ["protocollo", "Protocollo"]], msState.tipo, (v) => { msState.tipo = v; renderKind(); }, "Tipo di articolo"));
+  /* a manuscript is the name of a file of the manuscripts folder or a path chosen with "Scegli il manoscritto" */
+  const keys = [...d.scelti.filter((x) => x.esiste).map((x) => x.percorso), ...d.file.map((f) => f.nome)];
+  if (!keys.includes(msState.file)) { msState.file = keys[0] || null; msState.result = null; }
+  const fileBox = h("div"), resultBox = h("div"), checkBox = h("div");
+  const fileMsg = h("p", {class: "muted", role: "status"});
+  const choose = async (body) => {
+    fileMsg.textContent = body.percorso ? t("Controllo il percorso…") : t("Si apre la finestra di Windows per scegliere il file…");
+    try {
+      const r = await postJson("/api/manoscritti/scegli", body);
+      if (!r.scelto) { fileMsg.textContent = t("Nessun file scelto."); return; }
+      msState.file = r.scelto.percorso; msState.result = null; route();
+    } catch (e) { fileMsg.textContent = e.message; }
+  };
+  const radio = (key, name, sub, extra, disabled) => h("li", null, h("label", {class: disabled ? "off" : null},
+    h("input", {type: "radio", name: "ms-file", value: key, checked: key === msState.file || null, disabled: disabled || null,
+      onchange: () => { msState.file = key; msState.result = null; renderResult(); renderCheck(); }}),
+    h("span", null, h("span", {class: "ms-name"}, name), sub ? h("span", {class: "t-sub ms-path"}, sub) : null), extra));
+  const pathInput = h("input", {type: "text", placeholder: "C:\\Users\\…\\manoscritto.docx", "aria-label": "Percorso completo del manoscritto"});
+  const renderFiles = () => put(fileBox,
+    h("div", {class: "action-row"},
+      h("button", {type: "button", class: "btn primary", onclick: () => choose({})}, "Scegli il manoscritto…"),
+      h("details", {class: "action-more"}, h("summary", null, "oppure incolla il percorso"),
+        h("form", {class: "inline-form", onsubmit: (e) => { e.preventDefault(); if (pathInput.value.trim()) choose({percorso: pathInput.value.trim()}); }},
+          pathInput, h("button", {type: "submit", class: "btn"}, "Usa questo file")))),
+    fileMsg,
+    d.scelti.length ? [h("h3", null, "Manoscritti recenti"),
+      h("ul", {class: "ms-files", role: "radiogroup", "aria-label": "Manoscritti recenti"}, d.scelti.map((x) => radio(x.percorso, x.nome,
+        x.percorso, h("span", {class: "ms-extra"}, x.esiste ? h("span", {class: "t-sub"}, `${t("usato il")} ${fmtDate(x.ultimo_uso, false)}`) : tag("file non trovato", "warn"),
+          iconBtn("cestino", "Togli dallo storico", async () => {
+            try { await postJson("/api/manoscritti/dimentica", {percorso: x.percorso}); route(); } catch (e) { fileMsg.textContent = e.message; }
+          })), !x.esiste)))] : null,
+    d.file.length ? [h("h3", null, "Nella cartella manoscritti"),
+      h("ul", {class: "ms-files", role: "radiogroup", "aria-label": "Nella cartella manoscritti"}, d.file.map((f) => radio(f.nome, f.nome, null,
+        h("span", {class: "t-sub"}, ` ${fmtDate(f.modificato)}, ${fmtN(f.kb)} kB`))))] : null,
+    !keys.length ? h("p", {class: "empty"}, "Scegli il file Word (.docx) del manoscritto, dove si trova: ORPHEUS ne ricorda il percorso per le volte successive.") : null);
+  const pickBox = multiPick({label: "Riviste", items: journalItems(all).map((j) => ({...j,
+    label: (d.riviste.find((r) => r.sigla === j.value) || {}).titolo ? `${d.riviste.find((r) => r.sigla === j.value).titolo} (${j.value})` : j.label})),
+    selected: msState.riviste, onChange: () => { savePickMs(); renderCheck(); }});
+  const KINDS = [["auto", "Lo stima ORPHEUS"], ["originale", "Studio originale"], ["revisione", "Revisione sistematica o meta-analisi"], ["protocollo", "Protocollo"]];
+  const kindBox = h("div", {class: "radios", role: "radiogroup", "aria-label": "Tipo di articolo"}, KINDS.map(([v, label]) => h("label", {class: "radio"},
+    h("input", {type: "radio", name: "ms-kind", value: v, checked: msState.tipo === v || null, onchange: () => { msState.tipo = v; }}), label)));
   const run = async () => {
     if (!msState.file || !msState.riviste.size) return;
-    msState.busy = true; renderResult();
+    msState.busy = true; renderCheck();
+    if (msState.file.includes("\\") || msState.file.includes("/")) {           // a path of the history: last use now
+      try { await postJson("/api/manoscritti/scegli", {percorso: msState.file}); } catch (e) { /* the check says what is wrong */ }
+    }
     try { msState.result = await api(`/api/manoscritti/controllo?${msQuery()}`); msState.error = null; }
     catch (e) { msState.result = null; msState.error = e; }
-    msState.busy = false; renderResult();
+    msState.busy = false; renderCheck(); renderResult();
+    if (msState.result) resultBox.scrollIntoView({behavior: "smooth", block: "start"});
+  };
+  const renderCheck = () => {
+    const why = !msState.file ? "Scegli prima il manoscritto (punto 1)." : !msState.riviste.size ? "Scegli almeno una rivista (punto 2)." : null;
+    put(checkBox, h("div", {class: "action-row"},
+      h("button", {type: "button", class: "btn primary", disabled: !!why || msState.busy || null, onclick: run},
+        msState.busy ? "Controllo in corso…" : "Controlla il manoscritto"),
+      msState.result ? h("a", {class: "btn", href: `/api/manoscritti/rapporto?${msQuery()}`, target: "_blank", rel: "noopener"}, "Apri il rapporto da stampare") : null),
+      why ? h("p", {class: "muted"}, why) : null);
   };
   const renderResult = () => {
-    const btn = h("button", {type: "button", class: "btn primary", disabled: !msState.file || !msState.riviste.size || msState.busy,
-      onclick: run}, msState.busy ? "Controllo in corso…" : "Controlla il manoscritto");
-    const parts = [h("div", {class: "searchbar"}, btn, msState.result ? h("a", {class: "btn", href: `/api/manoscritti/rapporto?${msQuery()}`,
-      target: "_blank", rel: "noopener"}, "Apri il rapporto da stampare") : null)];
+    const parts = [];
     if (msState.error) parts.push(h("div", {class: "error", role: "alert"}, msState.error.message));
-    const r = msState.result;
-    if (r) parts.push(msResult(r));
+    if (msState.result) parts.push(h("section", {class: "block"}, msResult(msState.result)));
     put(resultBox, ...parts);
   };
-  renderFiles(); renderPick(); renderKind(); renderResult();
+  renderFiles(); renderCheck(); renderResult();
   const prepSel = h("select", {"aria-label": "Rivista per cui preparare il manoscritto"},
-    d.riviste.map((r) => h("option", {value: r.sigla, selected: msState.prepara === r.sigla || null}, `${r.sigla} - ${r.titolo}`)));
+    d.riviste.map((r) => h("option", {value: r.sigla, selected: msState.prepara === r.sigla || null}, r.titolo && r.titolo !== r.sigla ? `${r.titolo} (${r.sigla})` : r.sigla)));
   if (!msState.prepara && d.riviste.length) msState.prepara = [...msState.riviste][0] || d.riviste[0].sigla;
   prepSel.value = msState.prepara || "";
   prepSel.addEventListener("change", () => { msState.prepara = prepSel.value; });
-  const prep = await actionBlock("prepara_manoscritto", {
+  const prep = await actionBlock("prepara_manoscritto", {desc: "Revisione simulata e preparazione file",
     controls: h("div", {class: "filters"}, h("label", {class: "field"}, "Rivista (una sola)", prepSel),
       h("span", {class: "muted"}, "Manoscritto: quello scelto al punto 1.")),
     check: () => (!msState.file ? "Scegli prima il manoscritto (punto 1)." : !prepSel.value ? "Scegli la rivista." : null),
     extra: () => ({file: msState.file, rivista: prepSel.value})});
-  put(view, ...head("Manoscritti", "Controlla un manoscritto Word (.docx) rispetto alle regole delle riviste: lunghezza, abstract, parole chiave, sezioni, figure e tabelle, riferimenti e citazioni, dichiarazioni, formato della pagina. Il file resta su questo PC e non viene modificato.",
-    refreshButton(() => { clearCache(); route(); })),
-    h("div", {class: "cols"},
-      h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "1. Manoscritto"),
-        h("span", {class: "muted"}, "dalla cartella manoscritti")), fileBox, srcLine({fonte: d.cartella, data: null})),
-      h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "2. Riviste")), pickBox,
-        h("h3", null, "3. Tipo di articolo"), kindBox, srcLine(d))),
-    h("section", {class: "block"}, resultBox), prep);
+  put(view, ...head("Manoscritti", "Controllo del manoscritto o assistenza nella scrittura da zero", refreshButton(() => { clearCache(); route(); })),
+    h("div", {class: "ms-grid"},
+      h("div", {class: "stack"},
+        h("section", {class: "block"}, h("h2", null, "1. Manoscritto"), fileBox),
+        h("section", {class: "block"}, h("h2", null, "2. Riviste"), pickBox, srcLine(d)),
+        h("section", {class: "block"}, h("h2", null, "3. Tipo di articolo"), kindBox, checkBox)),
+      h("div", {class: "stack"}, prep)),
+    resultBox);
 };
 /* small icon buttons (pencil = edit, trash = remove): label for screen readers and tooltip */
 const ICONS = {
@@ -1225,7 +1310,10 @@ function iconBtn(kind, label, onclick) {
       ICONS[kind].map((d) => s("path", {d}))));
 }
 /* T-056: diario delle sottomissioni e lezioni dai revisori (R10: tutto resta su questo PC) */
+const subOpen = new Set();          // papers opened by the user: they stay open after a change
+let subForm = null;                 // the form shown: lavoro, nuova, evento
 sections.sottomissioni = async () => {
+  const view = liveView;
   const d = await get("/api/sottomissioni", true);
   const reload = () => { clearCache(); route(); };
   const opt = (pairs, value) => pairs.map(([v, l]) => h("option", {value: v, selected: v === value ? true : null}, t(l)));
@@ -1234,40 +1322,62 @@ sections.sottomissioni = async () => {
     try { await postJson(`/api/sottomissioni/${path}`, body); reload(); }
     catch (err) { if (errBox) { errBox.hidden = false; errBox.textContent = err.message; } else alert(err.message); }
   };
-  const form = (title, fields, path, button, after) => {
+  const form = (title, fields, path, button, after, help) => {
     const f = {};
     const msg = h("p", {class: "error", role: "alert", hidden: true});
-    const el = h("form", {class: "block", onsubmit: (e) => {
+    const el = h("form", {class: "jform", onsubmit: (e) => {
       e.preventDefault();
       const body = {};
       for (const [k, x] of Object.entries(f)) body[k] = x.value;
       msg.hidden = true;
       send(path, body, msg);
-    }}, h("h2", null, t(title)),
+      subForm = null;
+    }}, h("h3", null, title), help ? h("p", {class: "t-sub"}, help) : null,
       h("div", {class: "form-grid"}, fields.map(([k, label, input]) => field(t(label), (f[k] = input)))),
-      after ? after(f) : null, msg, h("div", {class: "action-row"}, h("button", {type: "submit", class: "btn primary"}, t(button))));
+      after ? after(f) : null, msg, h("div", {class: "action-row"}, h("button", {type: "submit", class: "btn primary"}, button), " ",
+        h("button", {type: "button", class: "btn", onclick: () => { subForm = null; showForm(); }}, "Annulla")));
     return el;
   };
   const today = new Date().toISOString().slice(0, 10);
   const inp = (attrs) => h("input", {type: "text", ...(attrs || {})});
   const sel = (pairs, value) => h("select", null, opt(pairs, value));
   const subPairs = subs.map((x) => [x.id, `${x.lavoro} → ${x.journal_title} (${x.submitted_on})`]);
-  const forms = h("details", null, h("summary", null, t("Nuovo lavoro, nuova sottomissione, nuova decisione")),
-    h("div", {class: "cols"},
-      form("Nuovo lavoro", [["nome", "Nome del lavoro (tuo)", inp({required: true})], ["titolo", "Titolo", inp({lang: "en"})],
-        ["tipo", "Tipo", sel([["", "—"], ...d.tipi.map((k) => [k, k])], "")]], "lavoro", "Aggiungi il lavoro"),
-      form("Nuova sottomissione", [
+  const FORMS = {
+    lavoro: () => form("Nuovo lavoro", [["nome", "Nome del lavoro (tuo)", inp({required: true})], ["titolo", "Titolo", inp({lang: "en"})],
+        ["tipo", "Tipo", sel([["", "—"], ...d.tipi.map((k) => [k, k])], "")]], "lavoro", "Aggiungi il lavoro", null,
+        "Il lavoro è il tuo articolo: lo registri una volta sola, poi gli aggiungi le sottomissioni."),
+    nuova: () => form("Nuova sottomissione", [
         ["lavoro", "Lavoro", sel(d.lavori.map((m) => [m.id, m.label]), "")],
         ["rivista_id", "Rivista (dall'elenco; se manca: Riviste → Nuova rivista)", h("select", {required: true}, opt([["", "— scegli —"], ...d.riviste.map((r) => [r.id, r.titolo])], ""))],
         ["data", "Data di invio", inp({type: "date", value: today, required: true})],
-        ["precedente", "Viene da (rifiuto o trasferimento)", sel([["", "—"], ...subPairs], "")]], "nuova", "Aggiungi la sottomissione")),
-    form("Aggiungi una decisione o un passo", [
+        ["precedente", "Viene da (rifiuto o trasferimento)", sel([["", "—"], ...subPairs], "")]], "nuova", "Aggiungi la sottomissione", null,
+        "Una sottomissione è un invio del lavoro a una rivista. Dopo un rifiuto, il nuovo invio a un'altra rivista è una nuova sottomissione."),
+    evento: () => form("Nuova decisione della rivista", [
       ["sottomissione", "Sottomissione", sel(subPairs, subPairs.length ? subPairs[subPairs.length - 1][0] : "")],
       ["evento", "Evento", sel(Object.entries(d.eventi), "revisione_maggiore")],
       ["data", "Data", inp({type: "date", value: today, required: true})],
       ["giro", "Giro di revisione", h("input", {type: "number", min: "1", value: "1"})],
-      ["scadenza", "Scadenza della revisione", inp({type: "date"})], ["nota", "Nota", inp()]], "evento", "Aggiungi",
-      (f) => field(t("Lettera della rivista (incollala intera: resta solo su questo PC). Le motivazioni e i commenti li aggiungi dopo, sotto la lettera."), (f.lettera = h("textarea", {rows: "8", lang: "en"})))));
+      ["scadenza", "Scadenza della revisione", inp({type: "date"})], ["nota", "Nota", inp()]], "evento", "Aggiungi la decisione",
+      (f) => field(t("Lettera della rivista (incollala intera: resta solo su questo PC). Le motivazioni e i commenti li aggiungi dopo, sotto la lettera."), (f.lettera = h("textarea", {rows: "8", lang: "en"}))),
+      "Ogni risposta o passo della rivista: revisione richiesta, rifiuto, accettazione, invio della revisione…"),
+  };
+  const formBox = h("div");
+  const showForm = () => {
+    put(formBox, subForm && FORMS[subForm] ? FORMS[subForm]() : null);
+    for (const b of addBar.querySelectorAll("button[data-f]")) b.setAttribute("aria-pressed", String(b.dataset.f === subForm));
+    const first = formBox.querySelector("input, select, textarea");
+    if (first) first.focus();
+  };
+  const addBtn = (k, label, disabled, why) => h("button", {type: "button", class: "btn", "data-f": k, "aria-pressed": "false",
+    disabled: disabled || null, title: disabled ? why : null, onclick: () => { subForm = subForm === k ? null : k; showForm(); }}, label);
+  const addBar = h("div", {class: "action-row add-bar"},
+    addBtn("lavoro", "1. Nuovo lavoro"),
+    addBtn("nuova", "2. Nuova sottomissione", !d.lavori.length, t("Prima aggiungi il lavoro.")),
+    addBtn("evento", "3. Nuova decisione della rivista", !subs.length, t("Prima aggiungi la sottomissione.")));
+  const forms = h("section", {class: "block"}, h("h2", null, "Aggiungi"),
+    h("p", {class: "muted"}, "In ordine: il lavoro (il tuo articolo), ogni invio a una rivista, ogni risposta della rivista."),
+    addBar, formBox);
+  showForm();
   const s = d.stato;
   const kpi = (v, l) => h("div", {class: "kpi static", role: "group"}, h("div", {class: "kpi-v"}, fmtN(v)), h("div", {class: "kpi-l"}, t(l)));
   const labelBox = (c) => {
@@ -1325,23 +1435,30 @@ sections.sottomissioni = async () => {
       iconBtn("matita", "Modifica questo passo", () => { editBox.hidden = !editBox.hidden; }),
       iconBtn("cestino", "Togli questo passo", () => { if (confirm(t("Togliere questo passo? Resta nella storia ma non si vede e non si conta."))) send("togli_evento", {evento_id: e.id}); })),
       sug, editBox,
-      e.lettera ? h("details", null, h("summary", null, `${t("Lettera del")} ${e.lettera.received_on} · ${e.lettera.commenti.length} ${t("commenti")}${e.lettera.no_comments ? ` · ${t("nessun commento della rivista")}` : ""}`),
+      e.lettera ? h("details", null, h("summary", null, `${t("Lettera del")} ${e.lettera.received_on} · ${plural(e.lettera.commenti.length, "commento", "commenti")}${e.lettera.no_comments ? ` · ${t("nessun commento della rivista")}` : ""}`),
         h("div", {class: "pre", lang: "en"}, e.lettera.text), commentsBox(e.lettera)) : null);
   };
   const subBlock = (x) => h("div", {class: "block"},
     h("h3", null, `${x.journal_title}`, " ", tag(t(x.stato_testo), ["accettato"].includes(x.stato) ? "ok" : "warn")),
     h("p", {class: "t-sub"}, [`${t("Inviato")} ${x.submitted_on}`,
-      x.giorni_alla_prima_decisione != null ? `${t("prima decisione dopo")} ${x.giorni_alla_prima_decisione} ${t("giorni")}` : null,
-      x.giorni_in_attesa != null ? `${t("in attesa da")} ${x.giorni_in_attesa} ${t("giorni")}` : null,
-      x.scadenza_revisione ? `${t("scadenza della revisione")} ${x.scadenza_revisione} (${x.giorni_alla_scadenza} ${t("giorni")})` : null].filter(Boolean).join(" · ")),
+      x.giorni_alla_prima_decisione != null ? `${t("prima decisione dopo")} ${plural(x.giorni_alla_prima_decisione, "giorno", "giorni")}` : null,
+      x.giorni_in_attesa != null ? `${t("in attesa da")} ${plural(x.giorni_in_attesa, "giorno", "giorni")}` : null,
+      x.scadenza_revisione ? `${t("scadenza della revisione")} ${x.scadenza_revisione} (${plural(x.giorni_alla_scadenza, "giorno", "giorni")})` : null].filter(Boolean).join(" · ")),
     h("ol", {class: "notes"}, x.eventi.map(eventRow)));
-  const papers = d.lavori.length ? d.lavori.map((m) => h("section", {class: "block"},
-    h("h2", null, m.label), m.title ? h("p", {class: "t-title", lang: "en"}, m.title) : null,
-    m.sottomissioni.length ? m.sottomissioni.map(subBlock) : h("p", {class: "empty"}, t("Nessuna sottomissione."))))
-    : [h("p", {class: "empty"}, t("Nessun lavoro: aggiungi il primo con «Nuovo lavoro» (anche le sottomissioni passate)."))];
+  const papers = d.lavori.length ? d.lavori.map((m) => {
+    const last = m.sottomissioni[m.sottomissioni.length - 1];
+    const box = h("details", {class: "block paper", open: subOpen.has(m.id) || null, ontoggle: () => {
+      if (box.open) subOpen.add(m.id); else subOpen.delete(m.id); }},
+      h("summary", null, h("span", {class: "paper-head"}, h("span", {class: "paper-name"}, m.label),
+        m.title ? h("span", {class: "t-title", lang: "en"}, m.title) : null,
+        h("span", {class: "t-sub"}, plural(m.sottomissioni.length, "sottomissione", "sottomissioni"),
+          last ? [" · ", t("ultima"), ": ", last.journal_title, " ", tag(t(last.stato_testo), last.stato === "accettato" ? "good" : "warn")] : null))),
+      m.sottomissioni.length ? m.sottomissioni.map(subBlock) : h("p", {class: "empty"}, t("Nessuna sottomissione.")));
+    return box;
+  }) : [h("p", {class: "empty"}, t("Nessun lavoro: aggiungi il primo con «1. Nuovo lavoro» (anche le sottomissioni passate)."))];
   const les = d.lezioni;
   const dec = (j) => Object.entries(j.decisioni).map(([k, n]) => `${t(les.eventi[k] || k)} ${n}`).join(", ") || "—";
-  const lessons = h("section", {class: "block"}, h("h2", null, t("Lezioni per rivista")), h("p", {class: "t-sub"}, t(les.nota)),
+  const lessons = h("section", {class: "block"}, h("h2", null, "Storico per rivista"), h("p", {class: "t-sub"}, t(les.nota)),
     les.riviste.length ? h("div", {class: "table-wrap"}, h("table", null,
       h("thead", null, h("tr", null, ["Rivista", "Sottomissioni", "Decisioni", "Commenti (confermati)", "Categorie (commenti)", "Giorni alla prima decisione"].map((c) => h("th", {scope: "col"}, t(c))))),
       h("tbody", null, les.riviste.map((j) => h("tr", null, h("th", {scope: "row"}, j.rivista), h("td", {class: "num"}, fmtN(j.sottomissioni)),
@@ -1349,11 +1466,12 @@ sections.sottomissioni = async () => {
         h("td", null, j.categorie.length ? j.categorie.map((c) => `${t(c.nome)} ${c.commenti}`).join(", ") : "—"),
         h("td", {class: "num"}, j.giorni_alla_prima_decisione.n ? `${fmtN(j.giorni_alla_prima_decisione.mediana)} (N = ${j.giorni_alla_prima_decisione.n})` : "—"))))))
       : h("p", {class: "empty"}, t("Ancora nessuna sottomissione.")));
-  put(view, ...head("Sottomissioni", t("Il diario dei tuoi articoli sottomessi: riviste, decisioni, lettere e le motivazioni o i commenti di editor e revisori che scrivi tu, classificati da Claude e confermati da te. Le lettere restano solo su questo PC: mai su GitHub, nei registri o nei pacchetti dei colleghi."),
-    refreshButton(reload)),
-    h("div", {class: "kpis"}, kpi(s.lavori, "lavori"), kpi(s.sottomissioni, "sottomissioni"), kpi(s.commenti, "commenti"),
+  put(view, ...head("Sottomissioni", "Storico delle sottomissioni", refreshButton(reload)),
+    h("div", {class: "kpis", "data-block": "Riepilogo"}, kpi(s.lavori, "lavori"), kpi(s.sottomissioni, "sottomissioni"), kpi(s.commenti, "commenti"),
       kpi(s.commenti_classificati, "classificati"), kpi(s.classificazioni_confermate, "confermati da te")),
-    forms, ...papers, lessons, srcLine(d));
+    forms, h("section", {class: "group"}, h("h2", {class: "group-title"}, "I tuoi lavori"),
+      h("p", {class: "muted"}, "Clic sul titolo per aprire lo storico del lavoro."), ...papers), lessons,
+    h("p", {class: "t-sub"}, "Le lettere restano solo su questo PC: mai su GitHub, nei registri o nei pacchetti dei colleghi."), srcLine(d));
 };
 function savePickMs() { try { localStorage.setItem(MS_KEY, JSON.stringify([...msState.riviste])); } catch (e) { /* not available */ } }
 function msResult(r) {
@@ -1446,6 +1564,7 @@ function msResult(r) {
 
 /* checks */
 sections.verifiche = async () => {
+  const view = liveView;
   const d = await get("/api/riviste");
   const v = d.verifiche, c = d.citazioni;
   const rows = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
@@ -1466,13 +1585,49 @@ sections.verifiche = async () => {
 
 /* lavora */
 let pollTimer = null, consoleNext = 0;
-sections.lavora = async () => {
-  const d = await api("/api/lavora");
+sections.funzioni = async () => {
+  const view = liveView;
+  const [d, info, pano] = await Promise.all([api("/api/lavora"), actionsInfo(true).catch(() => null), get("/api/panoramica").catch(() => null)]);
   const out = [];
-  out.push(...head("Lavora", "Lo stesso lavora di lavora.cmd: una copia di sicurezza, poi in ordine tutti i passi che hanno qualcosa da fare. Rilanciarlo è sicuro.",
-    h("button", {class: "btn", type: "button", onclick: () => route()}, "Aggiorna")));
+  out.push(...head("Funzioni", null, refreshButton(() => { clearCache(); route(); })));
 
-  const startBox = h("section", {class: "block", "aria-labelledby": "h-start"});
+  /* what needs a look: alerts (guidelines, lavora with errors) and the work lavora does not do, without repetitions */
+  const todo = h("ul", {class: "notes"});
+  for (const a of (pano ? pano.avvisi.righe : []).filter((x) => x.tipo !== "per te")) {
+    todo.append(h("li", null, tag(a.tipo, a.tipo === "lavora" ? "warn" : "acc"),
+      h("button", {type: "button", class: "linklike", onclick: () => go(a.vai === "lavora" ? "funzioni" : a.vai)}, a.testo)));
+  }
+  const workItem = (who, x) => h("li", null, tag(who, who === "per te" ? "warn" : ""), h("div", null,
+    h("b", null, `${x.lavoro}: ${fmtN(x.quanti)}`), x.sigle ? h("div", {class: "t-sub"}, x.sigle.join(", ")) : null,
+    x.file ? h("div", {class: "t-sub"}, x.file) : null, x.come ? h("div", {class: "t-sub"}, x.come) : null));
+  for (const x of d.lavori.per_te) todo.append(workItem("per te", x));
+  for (const x of d.lavori.per_claude) todo.append(workItem("per Claude", x));
+  if (!todo.children.length) todo.append(h("li", null, h("span", {class: "empty"}, "Niente da fare: è tutto aggiornato.")));
+  const last = pano && pano.ultimo_lavora;
+  out.push(h("section", {class: "block", "aria-labelledby": "h-todo"},
+    h("div", {class: "block-head"}, h("h2", {id: "h-todo"}, "Da guardare"),
+      last ? h("span", {class: "muted"}, `ultimo lavora: ${fmtDate(last.finito || last.iniziato)}`) : null),
+    todo, srcLine(d)));
+
+  /* index of the commands: a button goes to its panel (here or in its section) */
+  if (info) {
+    out.push(h("section", {class: "block", "aria-labelledby": "h-act"},
+      h("div", {class: "block-head"}, h("h2", {id: "h-act"}, "Comandi"), h("span", {class: "muted"}, "nell'ordine d'uso; clic per andare al comando")),
+      h("ol", {class: "flow"}, info.azioni.map((a) => h("li", null, h("button", {type: "button", class: "flow-step", onclick: () => {
+        const here = document.getElementById(`act-${a.azione}`);
+        if (here) { here.scrollIntoView({behavior: "smooth", block: "start"}); const b = here.querySelector("button.primary"); if (b) b.focus({preventScroll: true}); }
+        else go(a.sezione);
+      }}, h("span", {class: "flow-t"}, a.titolo), h("span", {class: "flow-n"}, `${a.comando}${a.sezione !== "funzioni" ? ` · ${t("in")} ${t(SECTION_NAMES[a.sezione] || a.sezione)}` : ""}`),
+        info.avvio.in_corso && info.avvio.azione === a.azione ? tag("in corso", "acc") : null))))));
+  }
+  const group = (id, title, kids) => h("section", {class: "group", "aria-labelledby": id}, h("h2", {class: "group-title", id}, title), ...kids.filter(Boolean));
+  if (info) {
+    out.push(group("g-art", "Articoli", [actionPanel(info, "aggiorna_articoli"), await unassignedBlock(),
+      h("h3", {class: "group-sub"}, "Schede degli articoli"), ...cardsBlocks(info)]));
+    out.push(group("g-riv", "Riviste", [actionPanel(info, "aggiorna_riviste")]));
+  }
+
+  const startBox = h("section", {class: "block", id: "act-lavora", "aria-labelledby": "h-start"});
   const busyElsewhere = d.in_corso_sul_pc && !d.avvio.in_corso;
   const startBtn = h("button", {class: "btn primary", type: "button", disabled: (!d.avvio.disponibile || d.avvio.in_corso || busyElsewhere) || null,
     onclick: () => { confirmBox.hidden = false; startBtn.hidden = true; confirmBox.querySelector("button").focus(); }}, "Avvia lavora");
@@ -1493,9 +1648,10 @@ sections.lavora = async () => {
   if (!d.avvio.disponibile) why = "Per avviare lavora da qui apri il cruscotto con cruscotto.cmd (in C:\\ORPHEUS).";
   else if (busyElsewhere) why = `lavora.cmd è già in corso in un'altra finestra (dal ${fmtDate(d.in_corso_sul_pc.iniziato)}, passo ${d.in_corso_sul_pc.passo || "—"}).`;
   append(startBox, [h("div", {class: "block-head"}, h("h2", {id: "h-start"}, "Avvia lavora"), stateLine),
+    h("p", {class: "muted"}, "Lo stesso di lavora.cmd: una copia di sicurezza, poi in ordine tutti i passi che hanno qualcosa da fare. Rilanciarlo è sicuro."),
     startBtn, why ? h("p", {class: "muted"}, why) : null, confirmBox, consoleBox,
     h("p", {class: "src"}, "Ogni avvio scrive un registro in C:\\ORPHEUS\\registri e lo invia a Claude, come lavora.cmd.")]);
-  out.push(startBox);
+  const lavoraKids = [startBox];
   if (d.avvio.in_corso || d.avvio.prossima) { consoleNext = 0; follow(consoleBox, stateLine, startBtn); }
 
   const planBox = h("div");
@@ -1510,20 +1666,8 @@ sections.lavora = async () => {
       put(planBox, ol, srcLine({fonte: "conteggi di engine-v1 (nessuna scrittura)", data: p.calcolato}));
     } catch (e) { put(planBox, errorBox(e)); }
   };
-  out.push(h("div", {class: "cols"},
-    h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Cosa manca adesso"), planBtn),
-      h("p", {class: "muted"}, `I ${d.passi.length} passi di lavora, in ordine. Il conteggio legge il database e le cartelle, senza internet.`), planBox),
-    h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Lavori che lavora non fa")),
-      h("h3", null, "Per te"),
-      d.lavori.per_te.length ? h("ul", {class: "notes"}, d.lavori.per_te.map((x) => h("li", null, h("div", null,
-        h("b", null, `${x.lavoro}: ${fmtN(x.quanti)}`), x.sigle ? h("div", {class: "t-sub"}, x.sigle.join(", ")) : null,
-        x.file ? h("div", {class: "t-sub"}, x.file) : null, h("div", {class: "t-sub"}, x.come)))))
-        : h("p", {class: "empty"}, "Niente: i controlli a mano sono fatti."),
-      h("h3", null, "Per Claude, in una sessione"),
-      d.lavori.per_claude.length ? h("ul", {class: "notes"}, d.lavori.per_claude.map((x) => h("li", null, h("div", null,
-        h("b", null, `${x.lavoro}: ${fmtN(x.quanti)}`), x.sigle ? h("div", {class: "t-sub"}, x.sigle.join(", ")) : null,
-        h("div", {class: "t-sub"}, x.come))))) : h("p", {class: "empty"}, "Niente."),
-      srcLine(d))));
+  lavoraKids.push(h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Cosa manca adesso"), planBtn),
+    h("p", {class: "muted"}, `I ${d.passi.length} passi di lavora, in ordine. Il conteggio legge il database e le cartelle, senza internet.`), planBox));
 
   const runs = d.esecuzioni;
   const rState = {sort: "iniziato", dir: -1, filtro: "tutte"};
@@ -1546,10 +1690,14 @@ sections.lavora = async () => {
         : h("p", {class: "empty"}, "Nessuna esecuzione con questo filtro."));
   };
   renderRuns();
-  out.push(h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Ultime esecuzioni dei passi")), runsHolder,
+  lavoraKids.push(h("details", {class: "block runs"}, h("summary", null, h("h2", {class: "inline-h"}, "Ultime esecuzioni dei passi")), runsHolder,
     srcLine({fonte: "task, workflow_run (engine-v1)", data: runs[0] && (runs[0].finito || runs[0].iniziato)})));
+  out.push(group("g-lav", "Lavora: tutto quello che manca", lavoraKids));
   put(view, ...out);
+  if (location.hash.includes("?vai=")) { const el = document.getElementById(hashParam("vai")); if (el) el.scrollIntoView({block: "start"}); }
 };
+const SECTION_NAMES = {articoli: "Articoli", riviste: "Riviste", affermazioni: "Consenso", manoscritti: "Manoscritti",
+  sistema: "Sistema", condivisione: "Condivisione", funzioni: "Funzioni"};
 function follow(consoleBox, stateLine, startBtn) {
   clearTimeout(pollTimer);
   const tick = async () => {
@@ -1576,15 +1724,15 @@ function follow(consoleBox, stateLine, startBtn) {
   tick();
 }
 const badge = document.getElementById("lavora-badge");
-const SECTION_OF = {aggiorna_articoli: "articoli", pacchetti: "articoli", chat_schede: "articoli", invia_schede_chat: "articoli",
-  aggiorna_riviste: "riviste", invia_lavoro_claude: "affermazioni",
+const SECTION_OF = {aggiorna_articoli: "funzioni", pacchetti: "funzioni", chat_schede: "funzioni", invia_schede_chat: "funzioni",
+  aggiorna_riviste: "funzioni", invia_lavoro_claude: "affermazioni",
   prepara_manoscritto: "manoscritti", manutenzione: "sistema", esporta_schede: "condivisione", importa_schede: "condivisione",
-  lavora: "lavora"};
-badge.addEventListener("click", () => go(badge.dataset.sec || "lavora"));
+  lavora: "funzioni"};
+badge.addEventListener("click", () => go(badge.dataset.sec || "funzioni"));
 function updateBadge(snap) {
   badge.hidden = !snap.in_corso;
   badge.textContent = snap.in_corso ? `${snap.titolo || "Lavora"}: in corso` : "";
-  badge.dataset.sec = (snap.azione && SECTION_OF[snap.azione]) || "lavora";
+  badge.dataset.sec = (snap.azione && SECTION_OF[snap.azione]) || "funzioni";
 }
 
 /* system */
@@ -1699,21 +1847,23 @@ function shareImportBlock(d) {
 }
 
 sections.condivisione = async () => {
+  const view = liveView;
   const d = await api("/api/condivisione");
   put(view, ...head("Condivisione", "Scambia con i colleghi le schede delle riviste e degli articoli, i metadati e i pezzi di testo. Niente PDF, niente manoscritti.",
-    h("button", {class: "btn", type: "button", onclick: () => route()}, "Aggiorna")),
+    refreshButton(() => route())),
     h("div", {class: "cols"}, shareExportBlock(d), shareImportBlock(d)),
     h("p", {class: "t-sub"}, "Vale per ORPHEUS ed EURYDIKE: le schede uniche degli articoli (Estrazione di EURYDIKE) viaggiano con le altre schede. Le revisioni sistematiche (protocollo, screening, decisioni) restano sul tuo PC."),
     h("p", {class: "src"}, `${t("Cartelle")}: ${d.cartella_creati} · ${d.cartella_ricevuti}`));
 };
 
 sections.sistema = async () => {
+  const view = liveView;
   const d = await api("/api/sistema");
   const cc = d.controllo_copia;
   const applied = d.migrazioni.filter((m) => m.stato === "applied").length;
   put(view, ...head("Sistema", "Dove sono i dati, se la copia del database è quella giusta, le copie di sicurezza e il budget.",
-    h("button", {class: "btn", type: "button", onclick: () => route()}, "Aggiorna")), await actionBlock("manutenzione"),
-    healthBlock(d.salute),
+    refreshButton(() => route())), await actionBlock("manutenzione"),
+    healthBlock(d.salute), textsBlock(),
     h("div", {class: "cols"},
       h("section", {class: "block"}, h("h2", null, "Database"), h("dl", {class: "kv"},
         h("dt", null, "File"), h("dd", null, d.database.percorso),
@@ -1832,7 +1982,7 @@ function renderTab(key, d) {
 
 function applyLang() {
   document.documentElement.lang = lang;
-  for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll("[data-i18n]")) { el.textContent = t(el.dataset.i18n); if (el.firstChild) el.firstChild.__src = el.dataset.i18n; }
   for (const el of document.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
   for (const b of document.querySelectorAll("[data-lang-set]")) b.setAttribute("aria-pressed", String(b.dataset.langSet === lang));
 }
@@ -1843,14 +1993,14 @@ for (const b of document.querySelectorAll("[data-lang-set]")) b.addEventListener
 });
 
 /* modules: ORPHEUS (green) and EURYDIKE (red); lavora, condivisione and sistema are shared */
-const SHARED = ["lavora", "condivisione", "sistema"];
+const SHARED = ["funzioni", "condivisione", "sistema"];
 const NAV = {
   orpheus: [["panoramica", "Panoramica"], ["articoli", "Articoli"], ["riviste", "Riviste"], ["manoscritti", "Manoscritti"],
-    ["sottomissioni", "Sottomissioni"], ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["lavora", "Lavora"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
+    ["sottomissioni", "Sottomissioni"], ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["funzioni", "Funzioni"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
   eurydike: [["eurydike/panoramica", "Panoramica"], ["eurydike/protocollo", "Protocollo"], ["eurydike/screening", "Screening"],
     ["eurydike/fulltext", "Full text"], ["eurydike/estrazione", "Estrazione (schede)"], ["eurydike/bias", "Rischio di bias"],
     ["eurydike/consenso", "Consenso"], ["eurydike/meta", "Meta-analisi"], ["eurydike/esporta", "Esporta"], null,
-    ["lavora", "Lavora"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
+    ["funzioni", "Funzioni"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
 };
 let moduleNow = "orpheus";
 let moduleShown = null;
@@ -1953,6 +2103,7 @@ function editForm(x, isRow, onSave, onCancel) {
   return form;
 }
 async function cardsList() {
+  const view = liveView;
   const d = await get("/api/eurydike/schede", true);
   const columns = [
     {key: "titolo", label: "Articolo", sort: true, cell: (r) => h("div", null, h("b", null, r.titolo || r.id), h("div", {class: "muted"}, [r.anno, shortDoi(r.doi)].filter(Boolean).join(" · ")))},
@@ -1975,6 +2126,7 @@ async function cardsList() {
   render();
 }
 async function cardDetail(aid) {
+  const view = liveView;
   let d = await api(`/api/eurydike/schede/${encodeURIComponent(aid)}`);
   const status = h("div", {class: "state-line", role: "status"});
   const valuesBox = h("div"), rowsBox = h("div"), headBox = h("div");
@@ -2248,6 +2400,7 @@ function eurFulltext(list, cur) {
     holder, srcLine(f)];
 }
 async function eurExtraction(list, cur) {
+  const view = liveView;
   const out = [];
   if (cur) {
     const e = cur.estrazione;
@@ -2369,6 +2522,7 @@ function postJson(path, body) {
   return api(path, {method: "POST", headers: {"X-Orpheus-Token": TOKEN, "Content-Type": "application/json"}, body: JSON.stringify(body || {})});
 }
 async function eurNewForm() {
+  const view = liveView;
   let tools = {rob: [], qualita: []};
   try { tools = await get("/api/eurydike/strumenti"); } catch (e) { /* the form works without the tools */ }
   let me = "";
@@ -2460,6 +2614,7 @@ function searchBlock(cur) {
 }
 
 async function eurydikeSection(sub) {
+  const view = liveView;
   if (sub === "nuova") return eurNewForm();
   const {list, cur} = await eurLoad();
   if (sub === "estrazione") {
@@ -2475,8 +2630,9 @@ async function eurydikeSection(sub) {
 
 function go(sec) { location.hash = `#/${sec}`; }
 async function route() {
-  const raw = (location.hash.replace(/^#\/?/, "").split("?")[0]) || "panoramica";
-  let sec = raw;
+  let raw = (location.hash.replace(/^#\/?/, "").split("?")[0]) || "panoramica";
+  if (raw === "lavora") raw = "funzioni";                     // old name of the section (links and bookmarks)
+  const sec = raw;
   if (raw.startsWith("eurydike/")) moduleNow = "eurydike";
   else if (!(SHARED.includes(raw) && moduleNow === "eurydike")) moduleNow = "orpheus";
   buildNav();
@@ -2485,12 +2641,16 @@ async function route() {
     if (a.dataset.sec === sec) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   }
   clearTimeout(pollTimer);
-  put(view, loading());
+  const box = h("div");
+  liveView = box;
+  viewRoot.replaceChildren(box);
+  put(box, loading());
   try {
     await fn();
-    const h1 = view.querySelector("h1");
+    if (LAYOUT_SECTIONS.has(sec) && liveView === box) { applyLayout(box, sec); decorate(); }
+    const h1 = box.querySelector("h1");
     if (h1 && document.activeElement === document.body) h1.focus({preventScroll: true});
-  } catch (e) { put(view, errorBox(e)); }
+  } catch (e) { put(box, errorBox(e)); }
 }
 window.addEventListener("hashchange", route);
 
@@ -2505,15 +2665,252 @@ for (const b of document.querySelectorAll("[data-theme-set]")) b.addEventListene
 let saved = "auto";
 try { saved = localStorage.getItem("orpheus-tema") || "auto"; } catch (e) { saved = "auto"; }
 setTheme(saved);
-applyLang();
 
 /* the lavora badge in the side bar follows a run started from this page */
 api("/api/lavora/uscita?da=999999999").then((snap) => { updateBadge(snap); if (snap.in_corso) {
   const t = setInterval(async () => { try { const x = await api("/api/lavora/uscita?da=999999999"); updateBadge(x); if (!x.in_corso) clearInterval(t); } catch (e) { clearInterval(t); } }, 3000);
 } }).catch(() => {});
 
-api("/api/sigle").then((x) => { setJournals(x.sigle); journalNames = new Map(Object.entries(x.titoli || {})); })
-  .catch(() => {}).finally(route);
+Promise.all([
+  api("/api/sigle").then((x) => { setJournals(x.sigle, x.articoli); journalNames = new Map(Object.entries(x.titoli || {})); }).catch(() => {}),
+  api("/api/testi").then((x) => { setOverrides(x.testi); textsFile = x.file; }).catch(() => {}),
+  api("/api/aspetto").then((x) => { LOOK = x; applyStyle(x.stile); }).catch(() => {}),
+]).finally(() => { applyLang(); buildNav(); route(); });
+
+/* ------------------------------------------------------------------ "Modifica i testi" (2026-10-30)
+   Clic on a text of the page, write the new one: it is saved in testi_cruscotto.json (data folder) and used at once.
+   The original Italian text stays the key, so "Ripristina" always brings it back. */
+let textsFile = "", editing = false;
+const editBtn = document.getElementById("text-edit");
+const editBar = h("div", {class: "tedit-bar", role: "status", hidden: true},
+  h("span", null, "Modifica dei testi: clic su un testo per cambiarlo."), " ",
+  h("button", {type: "button", class: "btn small", onclick: () => setEditing(false)}, "Fine"));
+document.body.append(editBar);
+function setEditing(on) {
+  if (on && lang === "en") { alert(t("I testi si modificano in italiano: passa a IT.")); return; }
+  if (on && layoutEditing) setLayoutEditing(false);
+  editing = on;
+  document.body.classList.toggle("text-edit", on);
+  editBar.hidden = !on;
+  editBtn.setAttribute("aria-pressed", String(on));
+  if (!on) closeTextEditor();
+}
+editBtn.addEventListener("click", () => setEditing(!editing));
+function textNodeAt(e) {
+  let n = null;
+  if (document.caretPositionFromPoint) { const pos = document.caretPositionFromPoint(e.clientX, e.clientY); n = pos && pos.offsetNode; }
+  else if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(e.clientX, e.clientY); n = r && r.startContainer; }
+  if (n && n.nodeType === 3 && n.__src) return n;
+  const el = e.target;
+  for (const c of (el && el.childNodes) || []) if (c.nodeType === 3 && c.__src && c.textContent.trim()) return c;
+  return null;
+}
+let teditBox = null;
+function closeTextEditor() { if (teditBox) { teditBox.remove(); teditBox = null; } }
+function openTextEditor(node) {
+  closeTextEditor();
+  let src = node.__src;
+  if (!hasOwn(IT_OVR, src) && IT_REV.has(src)) src = IT_REV.get(src);       // text already changed upstream
+  const changed = hasOwn(IT_OVR, src);
+  const area = h("textarea", {rows: String(Math.min(8, Math.max(2, Math.ceil(src.length / 60)))), "aria-label": "Testo nuovo"});
+  area.value = changed ? IT_OVR[src] : src;
+  const msg = h("p", {class: "error", role: "alert", hidden: true});
+  const save = async (value) => {
+    try {
+      const r = await postJson("/api/testi", {originale: src, nuovo: value});
+      setOverrides(r.testi); closeTextEditor(); applyLang(); buildNav(); route();
+    } catch (err) { msg.hidden = false; msg.textContent = err.message; }
+  };
+  teditBox = h("div", {class: "tedit", role: "dialog", "aria-label": "Modifica il testo"},
+    h("p", {class: "t-sub"}, "Testo originale"), h("p", {class: "tedit-orig", text: src}),
+    /\d/.test(src) ? h("p", {class: "t-sub"}, "Contiene numeri o nomi che cambiano: la modifica vale solo finché il testo resta identico.") : null,
+    area, msg,
+    h("div", {class: "action-row"}, h("button", {type: "button", class: "btn primary", onclick: () => save(area.value)}, "Salva"),
+      changed ? h("button", {type: "button", class: "btn", onclick: () => save("")}, "Ripristina l'originale") : null,
+      h("button", {type: "button", class: "btn", onclick: closeTextEditor}, "Annulla")));
+  for (const n of teditBox.querySelectorAll("*")) for (const c of n.childNodes) if (c.nodeType === 3) c.__src = null;
+  document.body.append(teditBox);
+  area.focus(); area.select();
+}
+document.addEventListener("click", (e) => {
+  if (!editing || e.target.closest("#text-edit, .tedit, .tedit-bar")) return;
+  e.preventDefault(); e.stopPropagation();
+  const node = textNodeAt(e);
+  if (node) openTextEditor(node);
+}, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !editing) return;
+  if (teditBox) closeTextEditor(); else setEditing(false);
+});
+function textsBlock() {
+  const rows = Object.entries(IT_OVR);
+  return h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Testi del cruscotto"),
+      h("button", {type: "button", class: "btn", onclick: () => setEditing(true)}, "Modifica i testi")),
+    h("p", {class: "muted"}, "Premi «Modifica i testi» (anche in fondo alla barra a sinistra), poi fai clic su qualsiasi testo della pagina e scrivi quello nuovo. Le modifiche valgono su ogni PC che usa questo disco dei dati."),
+    rows.length ? h("div", {class: "table-wrap"}, h("table", null,
+      h("thead", null, h("tr", null, h("th", {scope: "col"}, "Testo originale"), h("th", {scope: "col"}, "Testo nuovo"), h("th", {scope: "col"}, ""))),
+      h("tbody", null, rows.map(([k, v]) => h("tr", null, h("td", {text: k}), h("td", {text: v}),
+        h("td", null, h("button", {type: "button", class: "btn small", onclick: async () => {
+          try { const r = await postJson("/api/testi", {originale: k, nuovo: ""}); setOverrides(r.testi); applyLang(); buildNav(); route(); }
+          catch (err) { alert(err.message); }
+        }}, "Ripristina"))))))) : h("p", {class: "empty"}, "Nessun testo modificato."),
+    textsFile ? h("p", {class: "src"}, `${t("File")}: ${textsFile} (${t("si può anche aprire con il Blocco note: «testo originale»: «testo nuovo»")})`) : null);
+}
+
+/* ------------------------------------------------------------------ look (2026-10-30): styles and blocks
+   The style (colours, corners, headings) and, for each section, the order of the blocks, their width (whole or half)
+   and the blocks taken away: in aspetto_cruscotto.json of the data folder, the same on every PC. */
+let LOOK = {stile: "classico", sezioni: {}};
+const STYLE_NAMES = ["classico", "moderno", "industriale", "oceano", "terra"];
+const styleSel = document.getElementById("style-set");
+function applyStyle(st) {
+  if (!STYLE_NAMES.includes(st)) st = "classico";
+  document.documentElement.setAttribute("data-style", st);
+  styleSel.value = st;
+  try { localStorage.setItem("orpheus-stile", st); } catch (e) { /* not available */ }
+}
+styleSel.addEventListener("change", async () => {
+  applyStyle(styleSel.value); LOOK.stile = styleSel.value;
+  try { await postJson("/api/aspetto", {stile: styleSel.value}); } catch (e) { /* the style still applies here */ }
+});
+const LAYOUT_SECTIONS = new Set(["panoramica", "articoli", "riviste", "manoscritti", "sottomissioni", "verifiche", "funzioni",
+  "condivisione", "sistema"]);
+const BLOCK_SEL = ".block, .group, .stats, .kpis, details.block, section";
+let layoutEditing = false, layoutSec = null, layoutBox = null, dragItem = null;
+const layoutBtn = document.getElementById("layout-edit");
+function blockName(el, used) {
+  let txt = el.dataset.block || "";
+  const hd = txt ? null : el.querySelector("h1, h2, h3") || el.querySelector(".paper-name, summary:not(.mpick-sum)");
+  if (hd) {
+    const w = document.createTreeWalker(hd, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = w.nextNode())) if (n.textContent.trim() && !n.parentElement.closest(".sr-only")) { txt = n.__src || n.textContent; break; }
+  }
+  txt = (txt || el.getAttribute("aria-label") || "blocco").trim().slice(0, 120);
+  let k = txt, i = 2;
+  while (used.has(k)) k = `${txt} #${i++}`;
+  used.add(k);
+  return k;
+}
+function arrange(natural, saved) {
+  const out = saved.filter((k) => natural.includes(k));
+  natural.forEach((k, i) => {
+    if (out.includes(k)) return;
+    const prev = natural.slice(0, i).reverse().find((x) => out.includes(x));
+    out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, k);
+  });
+  return out;
+}
+function applyLayout(box, sec) {
+  layoutSec = sec; layoutBox = box;
+  const kids = [...box.children];
+  let start = 0;
+  while (start < kids.length && kids[start].matches(".view-head, .lede")) start++;
+  const units = [];
+  let buf = [];
+  for (const el of kids.slice(start)) {
+    if (el.matches(".cols, .ms-grid")) { for (const c of [...el.children]) { units.push({els: [...buf, c], el: c, half: true}); buf = []; } el.remove(); continue; }
+    if (el.matches(BLOCK_SEL)) { units.push({els: [...buf, el], el, half: false}); buf = []; } else buf.push(el);
+  }
+  if (!units.length) return;
+  const used = new Set();
+  for (const u of units) u.key = blockName(u.el, used);
+  const conf = (LOOK.sezioni || {})[sec] || {};
+  const hidden = new Set(conf.nascosti || []), width = conf.larghezza || {};
+  const grid = h("div", {class: "lay"});
+  for (const k of arrange(units.map((u) => u.key), conf.ordine || [])) {
+    const u = units.find((x) => x.key === k);
+    const half = width[k] ? width[k] === "mezza" : u.half;
+    const item = h("div", {class: `lay-item${half ? " half" : ""}${hidden.has(k) ? " is-hidden" : ""}`});
+    item.dataset.key = k;
+    item.append(...u.els);
+    grid.append(item);
+  }
+  if (buf.length) box.insertBefore(grid, buf[0]); else box.append(grid);
+}
+function layoutItems(grid) { return [...grid.querySelectorAll(":scope > .lay-item")]; }
+const saveLayout = debounce(async () => {
+  const grid = layoutBox && layoutBox.querySelector(":scope > .lay");
+  if (!grid) return;
+  const items = layoutItems(grid);
+  const conf = {ordine: items.map((i) => i.dataset.key), nascosti: items.filter((i) => i.classList.contains("is-hidden")).map((i) => i.dataset.key),
+    larghezza: Object.fromEntries(items.map((i) => [i.dataset.key, i.classList.contains("half") ? "mezza" : "intera"]))};
+  LOOK.sezioni = LOOK.sezioni || {};
+  LOOK.sezioni[layoutSec] = conf;
+  try { await postJson("/api/aspetto", {sezione: layoutSec, ...conf}); } catch (e) { alert(e.message); }
+}, 400);
+function moveItem(it, d) {
+  const sib = d < 0 ? it.previousElementSibling : it.nextElementSibling;
+  if (!sib || !sib.classList.contains("lay-item")) return;
+  if (d < 0) sib.before(it); else sib.after(it);
+  saveLayout();
+  const b = it.querySelector(`.lay-tools [data-move="${d}"]`);
+  if (b) b.focus();
+}
+function decorate() {
+  const grid = layoutBox && document.contains(layoutBox) ? layoutBox.querySelector(":scope > .lay") : null;
+  if (!grid) return;
+  grid.querySelectorAll(":scope > .lay-bar, :scope > .lay-item > .lay-tools").forEach((x) => x.remove());
+  grid.classList.toggle("editing", layoutEditing);
+  const items = layoutItems(grid);
+  for (const it of items) { it.hidden = it.classList.contains("is-hidden") && !layoutEditing; it.draggable = layoutEditing; }
+  if (!layoutEditing) return;
+  for (const it of items) {
+    const half = it.classList.contains("half"), off = it.classList.contains("is-hidden");
+    it.prepend(h("div", {class: "lay-tools"},
+      h("span", {class: "lay-grip", "aria-hidden": "true", title: "Trascina per spostare"}, "⠿"),
+      h("span", {class: "lay-name"}, it.dataset.key), off ? tag("tolto", "warn") : null,
+      h("span", {class: "lay-btns"},
+        h("button", {type: "button", class: "btn small", "data-move": "-1", "aria-label": "Sposta prima", title: "Sposta prima", onclick: () => moveItem(it, -1)}, "↑"),
+        h("button", {type: "button", class: "btn small", "data-move": "1", "aria-label": "Sposta dopo", title: "Sposta dopo", onclick: () => moveItem(it, 1)}, "↓"),
+        h("button", {type: "button", class: "btn small", onclick: () => { it.classList.toggle("half"); saveLayout(); decorate(); }},
+          half ? "Larghezza intera" : "Metà larghezza"),
+        h("button", {type: "button", class: "btn small", onclick: () => { it.classList.toggle("is-hidden"); saveLayout(); decorate(); }},
+          off ? "Rimetti" : "Togli"))));
+  }
+  const off = items.filter((i) => i.classList.contains("is-hidden"));
+  grid.prepend(h("div", {class: "lay-bar", role: "region", "aria-label": "Personalizza i blocchi"},
+    h("p", null, h("b", null, "Personalizza i blocchi di questa pagina."), " ",
+      "Trascina un blocco o usa le frecce; scegli la larghezza; «Togli» lo nasconde. Le modifiche si salvano da sole."),
+    off.length ? h("div", {class: "checks"}, h("span", {class: "t-sub"}, "Blocchi tolti, da aggiungere di nuovo:"),
+      off.map((it) => h("button", {type: "button", class: "btn small", onclick: () => { it.classList.remove("is-hidden"); saveLayout(); decorate(); }}, `+ ${it.dataset.key}`))) : null,
+    h("div", {class: "action-row"},
+      h("button", {type: "button", class: "btn small", onclick: async () => {
+        if (!confirm(t("Rimettere i blocchi di questa pagina come all'inizio?"))) return;
+        try { await postJson("/api/aspetto", {sezione: layoutSec, ripristina: true}); delete (LOOK.sezioni || {})[layoutSec]; route(); } catch (e) { alert(e.message); }
+      }}, "Ripristina la disposizione"),
+      h("button", {type: "button", class: "btn small primary", onclick: () => setLayoutEditing(false)}, "Fine"))));
+}
+function setLayoutEditing(on) {
+  if (on && editing) setEditing(false);
+  layoutEditing = on;
+  document.body.classList.toggle("layout-edit", on);
+  layoutBtn.setAttribute("aria-pressed", String(on));
+  if (on && !(layoutBox && document.contains(layoutBox) && layoutBox.querySelector(":scope > .lay"))) {
+    alert(t("Questa pagina non ha blocchi da spostare."));
+    layoutEditing = false; document.body.classList.remove("layout-edit"); layoutBtn.setAttribute("aria-pressed", "false");
+  }
+  decorate();
+}
+layoutBtn.addEventListener("click", () => setLayoutEditing(!layoutEditing));
+document.addEventListener("dragstart", (e) => {
+  const it = e.target.closest && e.target.closest(".lay.editing > .lay-item");
+  if (!it || e.target !== it) return;
+  dragItem = it; it.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  try { e.dataTransfer.setData("text/plain", it.dataset.key); } catch (x) { /* ignore */ }
+});
+document.addEventListener("dragover", (e) => {
+  if (!dragItem) return;
+  const it = e.target.closest && e.target.closest(".lay.editing > .lay-item");
+  e.preventDefault();
+  if (!it || it === dragItem || it.parentNode !== dragItem.parentNode) return;
+  const r = it.getBoundingClientRect();
+  const before = it.classList.contains("half") && dragItem.classList.contains("half") ? e.clientX < r.left + r.width / 2 : e.clientY < r.top + r.height / 2;
+  it.parentNode.insertBefore(dragItem, before ? it : it.nextSibling);
+});
+document.addEventListener("drop", (e) => { if (dragItem) e.preventDefault(); });
+document.addEventListener("dragend", () => { if (dragItem) { dragItem.classList.remove("dragging"); dragItem = null; saveLayout(); } });
 
 /* full name of a journal after one second on its abbreviation */
 let jTimer = null, jEl = null;

@@ -1507,7 +1507,9 @@ function Select-ManuscriptJournal([string]$Cmd, [string]$What = 'manoscritto') {
     $folder = $r.Json.cartella_manoscritti
     New-Item -ItemType Directory -Force -Path $folder | Out-Null
     if ($env:ORPHEUS_SCELTA_FILE -and $env:ORPHEUS_SCELTA_RIVISTA) {
-        $f = Join-Path $folder ([System.IO.Path]::GetFileName($env:ORPHEUS_SCELTA_FILE))
+        # 2026-10-30: anche un percorso completo scelto nel cruscotto ("Scegli il manoscritto"), fuori dalla cartella
+        if ([System.IO.Path]::IsPathRooted($env:ORPHEUS_SCELTA_FILE)) { $f = $env:ORPHEUS_SCELTA_FILE }
+        else { $f = Join-Path $folder ([System.IO.Path]::GetFileName($env:ORPHEUS_SCELTA_FILE)) }
         $sg = @($journals | Where-Object { $_.sigla -eq $env:ORPHEUS_SCELTA_RIVISTA })
         if (-not (Test-Path -LiteralPath $f) -or $sg.Count -eq 0) {
             Write-Log '  Manoscritto o rivista scelti nel cruscotto non trovati: scegli di nuovo.'; return $null

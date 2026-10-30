@@ -437,16 +437,16 @@ class Searcher:
 # ---------------------------------------------------------------- actions (buttons): the functions in the order of use
 # key = the -Comando of orpheus_comandi.ps1 (and the name of the .cmd). "gruppo": the steps of lavora it runs.
 ACTIONS: dict[str, dict] = {
-    "aggiorna_articoli": {"titolo": "Aggiungi e verifica gli articoli nuovi", "sezione": "articoli", "gruppo": "articoli",
+    "aggiorna_articoli": {"titolo": "Aggiungi e verifica gli articoli nuovi", "sezione": "funzioni", "gruppo": "articoli",
                           "scrive": True, "descrizione": "Legge i PDF nuovi della inbox, poi DOI con Crossref, riviste, "
                           "PubMed, Europe PMC, bibliografie, autori, pezzi di testo e vettori per la ricerca, report."},
-    "pacchetti": {"titolo": "Prepara i pacchetti per le schede", "sezione": "articoli", "gruppo": None, "scrive": True,
+    "pacchetti": {"titolo": "Prepara i pacchetti per le schede", "sezione": "funzioni", "gruppo": None, "scrive": True,
                   "priorita": True,
                   "passi": ["Sceglie gli articoli senza scheda secondo la priorità (una rivista, lo stesso numero per "
                             "rivista, oppure a sorte)", "Un pacchetto per articolo in rapporti\\pacchetti"],
                   "descrizione": "Prepara il lavoro delle schede degli articoli: le scrive Claude in sessione (strada "
                   "principale) oppure, in emergenza, una chat gratuita. Il testo resta su questo PC."},
-    "chat_schede": {"titolo": "Schede con una chat gratuita (emergenza)", "sezione": "articoli", "gruppo": None,
+    "chat_schede": {"titolo": "Schede con una chat gratuita (emergenza)", "sezione": "funzioni", "gruppo": None,
                     "scrive": False, "finestra": True,
                     "passi": ["Prepara il prossimo articolo e copia i messaggi negli appunti, uno alla volta",
                               "Legge la risposta della chat dagli appunti e la controlla",
@@ -454,14 +454,14 @@ ACTIONS: dict[str, dict] = {
                     "descrizione": "Solo per pochi articoli o quando Claude non può lavorare. Si apre una finestra che "
                     "guida passo per passo: incolli nella chat, copi la risposta, ORPHEUS la controlla. Il database "
                     "non cambia: per quello c'è \"Invia le schede della chat\"."},
-    "invia_schede_chat": {"titolo": "Invia le schede della chat", "sezione": "articoli", "gruppo": None,
+    "invia_schede_chat": {"titolo": "Invia le schede della chat", "sezione": "funzioni", "gruppo": None,
                           "scrive": True,
                           "passi": ["Copia di sicurezza del database",
                                     "Le schede accettate della chat, con gli stessi controlli delle schede di Claude",
                                     "Registro senza testo degli articoli"],
                           "descrizione": "Mette nel database le schede della chat gratuita già accettate (in "
                           "rapporti\\schede\\chat). Ognuna viene ricontrollata sul testo del database."},
-    "aggiorna_riviste": {"titolo": "Aggiorna le riviste", "sezione": "riviste", "gruppo": "riviste", "scrive": True,
+    "aggiorna_riviste": {"titolo": "Aggiorna le riviste", "sezione": "funzioni", "gruppo": "riviste", "scrive": True,
                          "descrizione": "Riviste dell'elenco e linee guida salvate (con gli avvisi se cambiano), schede "
                          "delle riviste scritte da Claude e controllo a mano, metriche da SCImago (file in inbox\\metriche) "
                          "e OpenAlex, report."},
@@ -491,7 +491,7 @@ ACTIONS: dict[str, dict] = {
                                  "Quello che hai già resta tuo"],
                        "descrizione": "Metti il file .zip ricevuto in ORPHEUS_DATI\\inbox\\condivisione. Si apre una "
                        "finestra che mostra cosa entrerebbe e chiede conferma."},
-    "lavora": {"titolo": "Lavora: tutto quello che manca", "sezione": "lavora", "gruppo": "tutto", "scrive": True,
+    "lavora": {"titolo": "Lavora: tutto quello che manca", "sezione": "funzioni", "gruppo": "tutto", "scrive": True,
                "descrizione": "Tutti i passi di lavora.cmd, in ordine."},
 }
 ACTION_ORDER = ("aggiorna_articoli", "aggiorna_riviste", "pacchetti", "invia_lavoro_claude", "chat_schede",
@@ -519,14 +519,94 @@ def actions_list() -> list[dict]:
 KINDS_ALLOWED = ("auto", "originale", "revisione", "protocollo")
 
 
+RECENT_MANUSCRIPTS = "manoscritti_recenti.json"     # local folder of the PC: paths never go to GitHub or the registri
+RECENT_MAX = 30
+
+
+def _recent_file(s: Settings) -> Path:
+    return Path(s.local_root) / RECENT_MANUSCRIPTS
+
+
+def recent_manuscripts(s: Settings) -> list[dict]:
+    """Manuscripts chosen with "Scegli il manoscritto" (2026-10-30): one path per manuscript, most recent first."""
+    try:
+        rows = json.loads(_recent_file(s).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, dict) and isinstance(r.get("percorso"), str)] if isinstance(rows, list) else []
+
+
+def _save_recent(s: Settings, rows: list[dict]) -> None:
+    f = _recent_file(s)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rows[:RECENT_MAX], ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+
+
+def remember_manuscript(s: Settings, path: str) -> dict:
+    """Checks a path chosen by the user (an existing .docx) and puts it first in the history."""
+    p = Path(str(path or "").strip().strip('"'))
+    if not str(p) or not p.is_absolute():
+        raise ValueError("scrivi il percorso completo del file Word (.docx)")
+    if p.suffix.lower() != ".docx" or p.name.startswith("~$"):
+        raise ValueError("il manoscritto deve essere un file Word .docx")
+    if not p.is_file():
+        raise ValueError(f"file non trovato: {p}")
+    rows = [r for r in recent_manuscripts(s) if os.path.normcase(r["percorso"]) != os.path.normcase(str(p))]
+    entry = {"percorso": str(p), "nome": p.name, "ultimo_uso": utc_now()}
+    _save_recent(s, [entry, *rows])
+    return entry
+
+
+def forget_manuscript(s: Settings, path: str) -> None:
+    _save_recent(s, [r for r in recent_manuscripts(s) if os.path.normcase(r["percorso"]) != os.path.normcase(str(path))])
+
+
+def _chosen_path(s: Settings, key: str) -> Path | None:
+    """A manuscript key: the name of a file of the manuscripts folder, or a path of the history (nothing else)."""
+    from . import manuscript
+    by_name = {f.name: f for f in manuscript.list_files(s.home)}
+    if key in by_name:
+        return by_name[key]
+    for r in recent_manuscripts(s):
+        if os.path.normcase(r["percorso"]) == os.path.normcase(key):
+            p = Path(r["percorso"])
+            return p if p.is_file() else None
+    return None
+
+
+def choose_manuscript_dialog(s: Settings) -> str | None:
+    """The Windows window "Apri" (the page runs on this PC): returns the chosen path or None if cancelled."""
+    if os.name != "nt":
+        raise ValueError("la finestra per scegliere il file c'è solo su Windows: incolla il percorso completo")
+    script = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; "
+              "$o=New-Object System.Windows.Forms.Form -Property @{TopMost=$true}; "
+              "$d=New-Object System.Windows.Forms.OpenFileDialog; $d.Filter='Word (*.docx)|*.docx'; "
+              "$d.Title='Scegli il manoscritto (ORPHEUS)'; "
+              "if($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK){ $d.FileName }")
+    r = subprocess.run([s.powershell, "-NoProfile", "-STA", "-Command", script], capture_output=True, timeout=900,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    out = r.stdout.decode("utf-8", "replace").strip()
+    return out or None
+
+
 def manuscripts(s: Settings, conn) -> dict:
-    """The .docx in the manuscripts folder of the data disk and the journals with a card. Read-only."""
+    """The .docx in the manuscripts folder of the data disk, the ones chosen elsewhere (history) and the journals with
+    a card. Read-only."""
     from . import compliance, manuscript
     files = manuscript.list_files(s.home)
     js = compliance.journals_with_cards(conn, s.journal_list())
+    info = lambda f: {"kb": max(1, round(f.stat().st_size / 1024)),  # noqa: E731
+                      "modificato": datetime.fromtimestamp(f.stat().st_mtime, timezone.utc).isoformat()}
+    chosen = []
+    for r in recent_manuscripts(s):
+        p = Path(r["percorso"])
+        chosen.append({"percorso": r["percorso"], "nome": p.name, "ultimo_uso": r.get("ultimo_uso"),
+                       "esiste": p.is_file(), **(info(p) if p.is_file() else {})})
     return {"cartella": str(manuscript.folder(s.home)),
-            "file": [{"nome": f.name, "kb": max(1, round(f.stat().st_size / 1024)),
-                      "modificato": datetime.fromtimestamp(f.stat().st_mtime, timezone.utc).isoformat()} for f in files],
+            "scelti": chosen,
+            "file": [{"nome": f.name, **info(f)} for f in files],
             "riviste": [{"sigla": j["sigla"] or j["titolo"], "titolo": j["titolo"], "data_scheda": j["data_scheda"]}
                         for j in js],
             "tipi": compliance.KINDS,
@@ -537,7 +617,7 @@ def manuscripts(s: Settings, conn) -> dict:
 def manuscript_check(s: Settings, conn, name: str, wanted: list[str] | None, kind: str, matcher=None) -> dict | None:
     """compliance-v1 on one file of the folder (only a name listed there: no other path can be asked). Read-only."""
     from . import compliance, manuscript
-    path = {f.name: f for f in manuscript.list_files(s.home)}.get(name)
+    path = _chosen_path(s, name)
     if path is None:
         return None
     out = compliance.run(conn, path, s.journal_list(), wanted, kind if kind in KINDS_ALLOWED else "auto",
@@ -545,7 +625,7 @@ def manuscript_check(s: Settings, conn, name: str, wanted: list[str] | None, kin
     out["file"] = name
     if not out.get("verifica_riferimenti"):           # T-038: the last saved check, no network from the dashboard
         out["verifica_riferimenti"] = compliance.last_reference_check(s.home, out["manoscritto"]["impronta"])
-    out.update(_src(f"{name} ({manuscript.MANUSCRIPT_VERSION}) e schede delle riviste (journal_card_value, "
+    out.update(_src(f"{path.name} ({manuscript.MANUSCRIPT_VERSION}) e schede delle riviste (journal_card_value, "
                     f"{compliance.COMPLIANCE_VERSION})", utc_now()))
     return out
 
@@ -1128,8 +1208,116 @@ def eurydike_write(s: Settings, conn, aid: str, body: dict) -> dict:
 
 # ---------------------------------------------------------------- web app
 
+def abbreviations(s: Settings) -> dict:
+    """Abbreviations and full names of the journal list, with the articles of each journal (for the colours: the
+    journals with more articles get the most distinct colours). Works also without the database."""
+    jl = s.journal_list()
+    counts = {}
+    try:
+        conn = s.connect()
+        try:
+            sig = _sigla_by_journal(conn, jl)
+            for jid, n in conn.execute("SELECT journal_id, count(*) FROM article WHERE journal_id IS NOT NULL GROUP BY 1"):
+                if jid in sig:
+                    counts[sig[jid]] = counts.get(sig[jid], 0) + n
+        finally:
+            conn.close()
+    except (FileNotFoundError, sqlite3.Error):
+        pass
+    return {"sigle": sorted({x["sigla"] for x in jl if x.get("sigla")}),
+            "titoli": {x["sigla"]: x.get("titolo") or x["sigla"] for x in jl if x.get("sigla")},
+            "articoli": counts, "fonte": s.project.storage.journals_csv}
+
+
+TEXTS_FILE = "testi_cruscotto.json"      # in the data folder: the same texts on every PC that uses the disk
+
+
+def page_texts(s: Settings) -> dict:
+    """The texts of the page changed by the user (2026-10-30): {original Italian text: new text}."""
+    try:
+        d = json.loads((Path(s.home) / TEXTS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in d.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(d, dict) else {}
+
+
+def set_page_text(s: Settings, original: str, new: str) -> dict:
+    original, new = str(original or ""), str(new or "")
+    if not original.strip() or len(original) > 4000 or len(new) > 4000:
+        raise ValueError("testo vuoto o troppo lungo")
+    d = page_texts(s)
+    if not new.strip() or new == original:
+        d.pop(original, None)
+    else:
+        if original not in d and len(d) >= 5000:
+            raise ValueError("troppi testi modificati")
+        d[original] = new
+    f = Path(s.home) / TEXTS_FILE
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(dict(sorted(d.items())), ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+    return d
+
+
+LOOK_FILE = "aspetto_cruscotto.json"     # in the data folder: style and blocks of each section, the same on every PC
+STYLES = ("classico", "moderno", "industriale", "oceano", "terra")
+
+
+def page_look(s: Settings) -> dict:
+    """The look chosen by the user (2026-10-30): {"stile": ..., "sezioni": {section: {ordine, nascosti, larghezza}}}."""
+    try:
+        d = json.loads((Path(s.home) / LOOK_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    style = d.get("stile") if d.get("stile") in STYLES else "classico"
+    sections = d.get("sezioni") if isinstance(d.get("sezioni"), dict) else {}
+    return {"stile": style, "sezioni": sections}
+
+
+def _keys(value, limit=200) -> list[str]:
+    if not isinstance(value, list) or len(value) > limit:
+        raise ValueError("elenco dei blocchi non valido")
+    out = []
+    for x in value:
+        if not isinstance(x, str) or not x or len(x) > 300:
+            raise ValueError("nome di blocco non valido")
+        out.append(x)
+    return out
+
+
+def set_page_look(s: Settings, body: dict) -> dict:
+    """Changes the style, or the layout of one section (order, hidden blocks, width), or restores a section."""
+    d = page_look(s)
+    if "stile" in body:
+        if body["stile"] not in STYLES:
+            raise ValueError("stile sconosciuto")
+        d["stile"] = body["stile"]
+    if "sezione" in body:
+        sec = str(body.get("sezione") or "")
+        if not re.fullmatch(r"[a-z/]{1,40}", sec):
+            raise ValueError("sezione non valida")
+        if body.get("ripristina"):
+            d["sezioni"].pop(sec, None)
+        else:
+            width = body.get("larghezza") or {}
+            if not isinstance(width, dict) or len(width) > 200 or any(
+                    not isinstance(k, str) or len(k) > 300 or v not in ("intera", "mezza") for k, v in width.items()):
+                raise ValueError("larghezza non valida")
+            d["sezioni"][sec] = {"ordine": _keys(body.get("ordine") or []), "nascosti": _keys(body.get("nascosti") or []),
+                                 "larghezza": width}
+    if len(d["sezioni"]) > 60:
+        raise ValueError("troppe sezioni")
+    f = Path(s.home) / LOOK_FILE
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+    return d
+
+
 def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | None = None, allowed_hosts=None,
-               opener=None, lookup_clients=None):
+               opener=None, lookup_clients=None, chooser=None):
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -1215,11 +1403,12 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
                      "ORPHEUS_PACCHETTI_QUANTI": str(how_many)}
         if ACTIONS[action].get("manoscritto"):
             from . import manuscript
-            name = Path(str(body.get("file") or "")).name
+            name = str(body.get("file") or "")
             sigla = str(body.get("rivista") or "")
-            names = {f.name for f in manuscript.list_files(s.home)}
-            if name not in names:
-                return JSONResponse({"errore": "scegli un manoscritto della cartella manoscritti"}, status_code=400)
+            chosen = _chosen_path(s, name)
+            if chosen is None:
+                return JSONResponse({"errore": "scegli prima il manoscritto"}, status_code=400)
+            name = chosen.name if chosen.parent == manuscript.folder(s.home) else str(chosen)
             if sigla not in {x["sigla"] for x in s.journal_list() if x.get("sigla")}:
                 return JSONResponse({"errore": "scegli una rivista"}, status_code=400)
             extra = {"ORPHEUS_SCELTA_FILE": name, "ORPHEUS_SCELTA_RIVISTA": sigla}
@@ -1464,20 +1653,59 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         except manuscript.ManuscriptError as exc:
             return JSONResponse({"errore": f"manoscritto non leggibile: {exc}"}, status_code=422)
         if out is None:
-            return JSONResponse({"errore": "manoscritto non trovato nella cartella manoscritti"}, status_code=404)
+            return JSONResponse({"errore": "manoscritto non trovato: sceglilo di nuovo"}, status_code=404)
         if as_html:
-            return HTMLResponse(compliance.render_html(out, name, datetime.now()))
+            return HTMLResponse(compliance.render_html(out, Path(name).name, datetime.now()))
         return out
+
+    async def simple_post(request: Request, fn):
+        """POST that writes no database: token, JSON body, clear messages."""
+        if request.headers.get("x-orpheus-token") != token:
+            return JSONResponse({"errore": "token mancante o sbagliato"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:                                                # noqa: BLE001
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"errore": "richiesta non leggibile"}, status_code=400)
+        from starlette.concurrency import run_in_threadpool
+        try:
+            return JSONResponse(await run_in_threadpool(fn, body))
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=422)
+
+    def choose(body):
+        path = body.get("percorso")
+        if not path:
+            path = (chooser or choose_manuscript_dialog)(s)
+            if not path:
+                return {"scelto": None}
+        return {"scelto": remember_manuscript(s, path)}
+
+    async def choose_endpoint(request: Request):
+        return await simple_post(request, choose)
+
+    async def forget_endpoint(request: Request):
+        return await simple_post(request, lambda b: (forget_manuscript(s, str(b.get("percorso") or "")), {"ok": True})[1])
+
+    async def look_endpoint(request: Request):
+        return await simple_post(request, lambda b: set_page_look(s, b))
+
+    async def texts_endpoint(request: Request):
+        return await simple_post(request, lambda b: {"testi": set_page_text(s, b.get("originale"), b.get("nuovo"))})
 
     routes = [
         Route("/", index),
+        Route("/api/testi", lambda r: JSONResponse({"testi": page_texts(s), "file": str(Path(s.home) / TEXTS_FILE)})),
+        Route("/api/testi", texts_endpoint, methods=["POST"]),
+        Route("/api/aspetto", lambda r: JSONResponse(page_look(s))),
+        Route("/api/aspetto", look_endpoint, methods=["POST"]),
+        Route("/api/manoscritti/scegli", choose_endpoint, methods=["POST"]),
+        Route("/api/manoscritti/dimentica", forget_endpoint, methods=["POST"]),
         Route("/api/manoscritti", with_db(lambda r, c: manuscripts(s, c))),
         Route("/api/manoscritti/controllo", with_db(manuscript_endpoint)),
         Route("/api/manoscritti/rapporto", with_db(lambda r, c: manuscript_endpoint(r, c, as_html=True))),
-        Route("/api/sigle", lambda r: JSONResponse({"sigle": sorted({x["sigla"] for x in s.journal_list() if x.get("sigla")}),
-                                                     "titoli": {x["sigla"]: x.get("titolo") or x["sigla"]
-                                                                for x in s.journal_list() if x.get("sigla")},
-                                                     "fonte": s.project.storage.journals_csv})),
+        Route("/api/sigle", lambda r: JSONResponse(abbreviations(s))),
         Route("/api/sottomissioni", with_db(lambda r, c: submissions_view(s, c))),
         Route("/api/sottomissioni/{what}", submissions_endpoint, methods=["POST"]),
         Route("/api/panoramica", with_db(lambda r, c: overview(s, c))),

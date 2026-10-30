@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cruscotto ORPHEUS</title>
 <link rel="stylesheet" href="/static/app.css">
+<script>try{var st=localStorage.getItem("orpheus-stile");if(st)document.documentElement.setAttribute("data-style",st)}catch(e){}</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d6b58'/%3E%3Cpath d='M8%206.5C11.9%206.5%2013.5%2010.1%2013.1%2013.6C12.8%2016.4%2011%2018.9%207.5%2020M24%206.5C20.1%206.5%2018.5%2010.1%2018.9%2013.6C19.2%2016.4%2021%2018.9%2024.5%2020M7.5%2020H24.5M16%2020V26.5' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body data-token="__ORPHEUS_TOKEN__" data-version="__ORPHEUS_VERSION__">
@@ -30,6 +31,17 @@
         <button type="button" data-lang-set="it" aria-pressed="true" lang="it">IT</button>
         <button type="button" data-lang-set="en" aria-pressed="false" lang="en">EN</button>
       </div>
+      <label class="stylesel"><span data-i18n="Stile">Stile</span>
+        <select id="style-set">
+          <option value="classico" data-i18n="Classico">Classico</option>
+          <option value="moderno" data-i18n="Moderno">Moderno</option>
+          <option value="industriale" data-i18n="Industriale">Industriale</option>
+          <option value="oceano" data-i18n="Oceano">Oceano</option>
+          <option value="terra" data-i18n="Terra">Terra</option>
+        </select>
+      </label>
+      <button type="button" class="btn small text-edit-btn" id="layout-edit" aria-pressed="false" data-i18n="Personalizza i blocchi">Personalizza i blocchi</button>
+      <button type="button" class="btn small text-edit-btn" id="text-edit" aria-pressed="false" data-i18n="Modifica i testi">Modifica i testi</button>
       <p class="version"><span data-i18n="Versione">Versione</span> __ORPHEUS_VERSION__</p>
     </div>
   </nav>
