@@ -105,7 +105,7 @@ def profile_of(rows: list[sqlite3.Row], items: dict[str, list[sqlite3.Row]]) -> 
 
 
 # ---------------------------------------------------------------- level 2: tests by objective (T-057c)
-OBJECTIVE_NOTE = ("Obiettivo e disegno dalle schede (contratto obiettivi-v1): «proposti» sono valori di Claude non ancora "
+OBJECTIVE_NOTE = ("Obiettivo e disegno dalle schede (contratto obiettivi-v2; i tipi di obiettivi-v1 ancora da riclassificare sono segnati): «proposti» sono valori di Claude non ancora "
                   "controllati da te; i test e i modelli sono le voci stats-terms-v1 dei Metodi e dei Risultati, contati "
                   "una volta per articolo; «analisi principale» è quella scritta nella scheda per l'esito primario. "
                   "Guarda sempre N.")
@@ -113,8 +113,8 @@ OBJECTIVE_NOTE = ("Obiettivo e disegno dalle schede (contratto obiettivi-v1): «
 
 def objective_items(conn: sqlite3.Connection) -> dict[str, dict]:
     """{article_id: {field: value, "confermato": bool}} for the articles whose objective type is in the card (current
-    values, a value marked not reported left out). `confermato`: every choice field written was confirmed or corrected
-    by the user."""
+    values, a value marked not reported left out). `confermato`: the objective type and every design field written were
+    confirmed or corrected by the user."""
     from . import objectives
     out: dict[str, dict] = {}
     marks = ",".join("?" * len(objectives.CHOICE_FIELDS))
@@ -125,7 +125,7 @@ def objective_items(conn: sqlite3.Connection) -> dict[str, dict]:
         if r["value"] in (None, "not reported"):
             continue
         a[r["field_key"]] = r["value"]
-        if r["state"] == "ai" and r["field_key"] != "analisi_principale":
+        if r["state"] == "ai" and r["field_key"] in ("tipo_obiettivo",) + objectives.DESIGN_FIELDS:
             a["confermato"] = False
     return {k: v for k, v in out.items() if v.get("tipo_obiettivo")}
 

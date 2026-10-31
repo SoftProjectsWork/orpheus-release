@@ -1098,7 +1098,7 @@ function Invoke-Metodi {
 # ---------------------------------------------------------------- obiettivo e disegno degli articoli (T-057c)
 function Invoke-Obiettivi {
     Write-Log ''
-    Write-Log 'OBIETTIVO E DISEGNO DEGLI ARTICOLI (obiettivi-v1, nella scheda unica cards-v2): invio delle schede scritte da'
+    Write-Log 'OBIETTIVO E DISEGNO DEGLI ARTICOLI (obiettivi-v2, nella scheda unica cards-v2): invio delle schede scritte da'
     Write-Log 'Claude e pacchetti nuovi (prima sport, esercizio fisico e biomeccanica). Copia di sicurezza prima di scrivere.'
     # 2026-10-28: si puo' scegliere una rivista (es. SJMSS); dal cruscotto arriva in ORPHEUS_OBIETTIVI_RIVISTA.
     $sigla = "$env:ORPHEUS_OBIETTIVI_RIVISTA".Trim()
@@ -1113,9 +1113,16 @@ function Invoke-Obiettivi {
         $n = "$(Read-Host '  Quanti pacchetti aperti vuoi? (solo Invio = 10, massimo 50)')".Trim()
     }
     $qty = 10; if ([int]::TryParse("$n", [ref]$qty)) { $qty = [Math]::Min(50, [Math]::Max(1, $qty)) } else { $qty = 10 }
-    $argsO = @('obiettivi', '--pacchetti', "$qty")
+    # 2026-11-01 (obiettivi-v2): le schede scritte con obiettivi-v1 si completano con i campi nuovi (natura dello studio,
+    # replicazione, tipo di obiettivo di nuovo); dal cruscotto in ORPHEUS_OBIETTIVI_COMPLETA.
+    $c = "$env:ORPHEUS_OBIETTIVI_COMPLETA".Trim()
+    if (-not $c -and -not $env:ORPHEUS_OBIETTIVI_NON_CHIEDERE) {
+        $c = "$(Read-Host '  Schede vecchie da completare con i tipi nuovi? Quante? (solo Invio = 0, massimo 50)')".Trim()
+    }
+    $qc = 0; if ([int]::TryParse("$c", [ref]$qc)) { $qc = [Math]::Min(50, [Math]::Max(0, $qc)) } else { $qc = 0 }
+    $argsO = @('obiettivi', '--pacchetti', "$qty", '--completa', "$qc")
     if ($sigla) { $argsO += @('--rivista', $sigla); Write-Log "  Rivista scelta: $sigla" }
-    Write-Log "  Pacchetti aperti voluti: $qty"
+    Write-Log "  Pacchetti aperti voluti: $qty; schede da completare: $qc"
     $r = Invoke-Orpheus $argsO
     if (-not $r.Json -or -not $r.Json.contratto) { Show-Error $r; return }
     $j = $r.Json
@@ -1129,6 +1136,7 @@ function Invoke-Obiettivi {
     } else { Write-Log '  Nessuna scheda da inviare.' }
     Write-Log ("  Pacchetti aperti per Claude: {0} (nuovi {1}); articoli ancora da fare dopo questi: {2} (sul tema: {3})" -f $j.pacchetti_aperti, $j.esecuzioni_nuove, $j.da_fare_dopo, $j.sul_tema)
     if ($j.rivista) { Write-Log ("  Di {0}: pacchetti aperti {1}; articoli di {0} ancora da fare dopo questi: {2}" -f $j.rivista, $j.aperti_della_rivista, $j.da_fare_dopo) }
+    if ($j.completamenti_aperti) { Write-Log ("  Schede da completare (tipi nuovi): pacchetti aperti {0} (nuovi {1}); ancora da completare dopo questi: {2}" -f $j.completamenti_aperti, $j.completamenti_nuovi, $j.da_completare_dopo) }
     if ($j.non_studi_esclusi) { Write-Log "  Non-studi lasciati fuori (viewpoint, editoriali, senza Metodi): $($j.non_studi_esclusi)" }
     foreach ($p in @($j.problemi)) { if ($p) { Write-Log "    ! $($p.article_id): $($p.problema)" } }
     Write-Log "  Nel database: articoli con obiettivo $($j.stato.articoli_con_obiettivo)"

@@ -1182,11 +1182,16 @@ def eurydike_write(s: Settings, conn, aid: str, body: dict) -> dict:
         page = int(page) if page is not None else None
     except ValueError as exc:
         raise store.StoreError("la pagina è un numero") from exc
+    from . import objectives
     if action == "conferma_esatte":
         out = store.confirm_exact(conn, aid)
+    elif action == "conferma_obiettivi":                                  # 2026-11-01: «Conferma tutto l'articolo»
+        out = objectives.confirm_article(conn, aid)
     elif action == "esporta":
         out = store.export_card(conn, aid, s.home)
     elif action in ("conferma", "correggi", "nr") and body.get("esito") is None:
+        if action == "correggi":
+            objectives.check_correction(str(body.get("campo") or ""), txt("valore"))
         out = store.set_item(conn, aid, str(body.get("campo") or ""), item_ord=int(body.get("ordine") or 1),
                              state={"conferma": "confirmed", "correggi": "edited", "nr": "nr"}[action],
                              value=txt("valore"), unit=txt("unita"), quote=txt("citazione"), page=page, note=txt("nota"))
@@ -1204,6 +1209,12 @@ def eurydike_write(s: Settings, conn, aid: str, body: dict) -> dict:
         if getattr(s.project, "local", None) is not None:
             backup_mod.maybe_auto_backup(conn, state, s.project.local, head_before=before)
     return {"esito": out, "scheda": eurydike_card(s, conn, aid)}
+
+
+def objective_rows(s: Settings, conn, q) -> dict:
+    """Objective and design of the articles (obiettivi-v2) for the quick confirmation, one row per article."""
+    from . import objectives
+    return {**objectives.review_rows(conn, q.get("rivista") or None), **_src("card_item (cards-v2, obiettivi-v2)", utc_now())}
 
 
 # ---------------------------------------------------------------- web app
@@ -1746,6 +1757,7 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         Route("/api/eurydike/revisioni/{rid}/importa", import_endpoint, methods=["POST"]),
         Route("/api/eurydike/revisioni/{rid}", with_db(review_endpoint)),
         Route("/api/eurydike/revisioni/{rid}/record", with_db(records_endpoint)),
+        Route("/api/obiettivi", with_db(lambda r, c: objective_rows(s, c, r.query_params))),
         Route("/api/eurydike/schede", with_db(lambda r, c: eurydike_cards(s, c))),
         Route("/api/eurydike/schede/{aid}", with_db(eurydike_card_endpoint)),
         Route("/api/eurydike/schede/{aid}/storia", with_db(lambda r, c: eurydike_history(c, r.path_params["aid"], r.query_params))),

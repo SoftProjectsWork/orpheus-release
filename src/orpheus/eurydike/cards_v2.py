@@ -57,11 +57,31 @@ NEW_FIELDS: dict[str, dict] = {
 OBJECTIVE_TYPES = {
     "confronto_gruppi": "Comparison between groups",
     "confronto_condizioni": "Comparison between conditions or limbs in the same subjects (e.g. operated vs healthy limb, "
-                            "two shoes; added 2026-10-28)",
+                            "two shoes, acute conditions in one session; added 2026-10-28)",
     "effetto_intervento": "Effect of an intervention (pre-post, with or without a control group)",
+    "andamento_nel_tempo": "Course over time: repeated measures of the same subjects without an intervention (e.g. during "
+                           "a race, across the phases of a cycle, over a season; added 2026-11-01)",
     "associazione_predizione": "Association or prediction",
-    "affidabilita_validita": "Reliability or validity (of a measure, test or instrument)",
+    "affidabilita": "Reliability (repeatability, agreement) of a measure, test or instrument (2026-11-01)",
+    "validita": "Validity (against a criterion, construct, content) of a measure, test or instrument (2026-11-01)",
     "descrittivo": "Descriptive",
+}
+# obiettivi-v1 values no longer written (2026-11-01: «affidabilita_validita» split in affidabilita and validita): kept only
+# to read and show the values already in the database until they are reclassified.
+OBJECTIVE_TYPES_OLD = {"affidabilita_validita": "Reliability or validity (obiettivi-v1, to reclassify)"}
+# obiettivi-v2 (approved by the user on 2026-10-31 23:07): the nature of the study, so that «descrittivo» and the others
+# can be split without losing the table tests × objective; «altro» only with a note.
+STUDY_NATURE = {
+    "rct": "Randomised controlled trial with parallel groups",
+    "crossover": "Crossover (every subject receives every condition in sequence, randomised or not)",
+    "non_randomizzato": "Intervention without randomisation (single group pre-post, or non-randomised controlled)",
+    "coorte": "Cohort: the same subjects followed over time (prospective or retrospective), no intervention assigned",
+    "caso_controllo": "Case-control: subjects selected by the outcome (cases) compared with controls",
+    "trasversale": "Cross-sectional: one occasion (also a single laboratory session comparing groups or conditions)",
+    "serie_di_casi": "Case series or single case",
+    "indagine": "Survey or questionnaire study",
+    "qualitativo": "Qualitative study (interviews, focus groups)",
+    "altro": "Other (e.g. development of a protocol): write the reason in 'nota'",
 }
 COUNTS = {"uno": "one", "due": "two", "piu_di_due": "more than two"}
 YES_NO = {"si": "yes", "no": "no"}
@@ -77,6 +97,10 @@ LEVEL2_NEW = {
                         "descrizione": "Same subjects measured at every time point or condition (repeated measures): si / no."},
     "crossover": {"tipo": "scelta", "valori": tuple(YES_NO),
                   "descrizione": "Crossover design (every subject receives every condition in sequence): si / no."},
+    "natura_studio": {"tipo": "scelta", "valori": tuple(STUDY_NATURE),
+                      "descrizione": "Nature of the study: " + "; ".join(f"{k} = {v}" for k, v in STUDY_NATURE.items())},
+    "replicazione": {"tipo": "scelta", "valori": tuple(YES_NO),
+                     "descrizione": "The study says it replicates an earlier study (si / no; 'no' when it does not say so)."},
     "esito_primario": {"tipo": "testo", "descrizione": "Primary (main) outcome as written; if none is declared primary, "
                                                        "origin 'interpreted' and the outcome of the main aim."},
     "analisi_principale": {"tipo": "testo", "descrizione": "Statistical test or model used for the primary outcome, as written."},

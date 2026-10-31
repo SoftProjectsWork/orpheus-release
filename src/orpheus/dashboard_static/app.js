@@ -1846,6 +1846,93 @@ function shareImportBlock(d) {
     rec.length ? [h("h3", null, "File ricevuti"), h("ul", {class: "plain"}, rec.map((f) => shareFileLine(f, true, trial)))] : null);
 }
 
+/* ------------------------------------------------------------------ Obiettivi e disegno (2026-11-01, obiettivi-v2)
+   Quick confirmation of the objective cards: one row per article; «Conferma tutto l'articolo» confirms only the values
+   whose sentence was found exactly in the text; «Correggi» per field (choice fields: one of the allowed values). */
+const objState = {filtro: "da", rivista: ""};
+const OBJ_GROUPS = [["Obiettivo", ["obiettivo", "tipo_obiettivo"]], ["Disegno", ["natura_studio", "disegno_tempi", "disegno_gruppi", "stessi_soggetti", "crossover", "replicazione"]],
+  ["Esito e analisi", ["esito_primario", "analisi_principale", "effetto_principale"]]];
+const OBJ_SHORT = {stato: {ai: ["da controllare", "warn"], confirmed: ["confermato", "good"], edited: ["corretto", "acc"], nr: ["non riportato", ""]}};
+sections.obiettivi = async () => {
+  const view = liveView;
+  const q = objState.rivista ? `?rivista=${encodeURIComponent(objState.rivista)}` : "";
+  let d = await get(`/api/obiettivi${q}`, true);
+  const names = Object.fromEntries(d.campi);
+  const status = h("div", {class: "state-line", role: "status"});
+  const holder = h("div");
+  const reload = async (text) => { clearCache(); d = await get(`/api/obiettivi${q}`, true); put(status, tag(text, "good")); draw(); };
+  const fail = (e) => put(status, h("span", {class: "error"}, e.message));
+  function editBox(a, fk, x, tr) {
+    const choices = d.scelte[fk];
+    const value = choices ? h("select", {name: "valore"}, choices.map(([v, l]) => h("option", {value: v, selected: x && x.valore === v ? true : null}, l)))
+      : h("textarea", {name: "valore", rows: "2"}, x && x.valore !== "not reported" ? x.valore || "" : "");
+    const quote = h("textarea", {name: "citazione", rows: "3"}, x ? x.citazione || "" : "");
+    const page = h("input", {type: "text", name: "pagina", inputmode: "numeric", size: 4, value: x && x.pagina ? String(x.pagina) : ""});
+    const note = h("input", {type: "text", name: "nota", value: ""});
+    const msg = h("p", {class: "error", role: "alert", hidden: true});
+    const label = names[fk] || fk;
+    const row = h("tr", {class: "row-extra"});
+    const close = () => row.remove();
+    const nr = h("button", {type: "button", class: "btn", onclick: () => cardWrite(a.id, {azione: "nr", campo: fk, ordine: x ? x.ordine : 1})
+      .then(() => reload(`${t("Segnato non riportato")}: ${t(label)}`), (e) => { msg.hidden = false; msg.textContent = e.message; })}, "Non riportato");
+    const form = h("form", {class: "edit-form", onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        await cardWrite(a.id, {azione: "correggi", campo: fk, ordine: x ? x.ordine : 1, valore: value.value, citazione: quote.value, pagina: page.value, nota: note.value});
+        await reload(`${t("Corretto")}: ${t(label)}`);
+      } catch (err) { msg.hidden = false; msg.textContent = err.message; }
+    }}, h("b", null, label, x && x.ordine > 1 ? ` (${x.ordine})` : ""), fk === "obiettivo" || !choices ? null : h("p", {class: "t-sub"}, "Scegli il valore giusto; la frase resta quella della proposta se non la cambi."),
+      field("Valore corretto", value), field("Frase dell'articolo (copiata dal PDF)", quote), field("Pagina", page), field("Nota", note), msg,
+      h("div", {class: "action-row"}, h("button", {type: "submit", class: "btn primary"}, "Salva la correzione"), " ", nr, " ",
+        h("button", {type: "button", class: "btn", onclick: close}, "Annulla")));
+    put(row, h("td", {colspan: 5}, form));
+    if (tr.nextElementSibling && tr.nextElementSibling.classList.contains("row-extra")) tr.nextElementSibling.remove();
+    tr.after(row);
+    setTimeout(() => value.focus(), 0);
+  }
+  function valueLine(a, f, x, tr) {
+    const [st, sk] = OBJ_SHORT.stato[x.stato] || [x.stato, ""];
+    const shown = x.valore === "not reported" ? t("non riportato") : (x.etichetta || x.valore);
+    const tipText = x.citazione ? `«${x.citazione}» — p. ${x.pagina || "?"}${x.controllo_citazione !== "exact" ? ` (${t((QUOTE_TAG[x.controllo_citazione] || [x.controllo_citazione])[0])})` : ""}` : t("senza frase");
+    return h("div", {class: "obj-val"}, h("span", {class: "muted"}, `${t(names[f] || f)}${x.ordine > 1 ? ` ${x.ordine}` : ""}: `),
+      h("span", {lang: x.etichetta ? null : "en", title: tipText}, shown), x.stato !== "ai" ? [" ", tag(t(st), sk)] : null,
+      " ", h("button", {type: "button", class: "linklike", "aria-label": `${t("Correggi")}: ${t(names[f] || f)}`, onclick: () => editBox(a, f, x, tr)}, "Correggi"));
+  }
+  function draw() {
+    const rows = d.articoli.filter((a) => objState.filtro === "tutti" || (objState.filtro === "da" ? a.da_controllare > 0 : a.v1));
+    const tbody = h("tbody");
+    for (const a of rows) {
+      const tr = h("tr");
+      const cells = OBJ_GROUPS.map(([, fs]) => h("td", null, fs.flatMap((f) => (a.campi[f] || [{ordine: 1, valore: null, stato: "missing"}]).map((x) =>
+        x.stato === "missing" ? h("div", {class: "obj-val"}, h("span", {class: "muted"}, `${t(names[f] || f)}: —`), " ",
+          h("button", {type: "button", class: "linklike", "aria-label": `${t("Aggiungi")}: ${t(names[f] || f)}`, onclick: () => editBox(a, f, null, tr)}, "Aggiungi"))
+          : valueLine(a, f, x, tr)))));
+      append(tr, [h("th", {scope: "row"}, h("div", {class: "t-title", lang: "en"}, a.titolo || a.id),
+        h("div", {class: "t-sub"}, [a.rivista, a.anno].filter(Boolean).join(" · ")), a.v1 ? tag(t("da completare (obiettivi-v1)"), "warn") : null), ...cells,
+        h("td", null, h("div", {class: "card-actions"},
+          h("button", {type: "button", class: "btn small primary", disabled: !a.esatte || null, "aria-label": `${t("Conferma tutto l'articolo")}: ${a.titolo || a.id}`,
+            onclick: () => cardWrite(a.id, {azione: "conferma_obiettivi"}).then((r) => reload(`${t("Confermati")} ${fmtN(r.esito.confermati)}: ${a.titolo || a.id}`), fail)},
+            `${t("Conferma tutto l'articolo")} (${fmtN(a.esatte)})`),
+          a.da_controllare > a.esatte ? h("span", {class: "t-sub"}, `${fmtN(a.da_controllare - a.esatte)} ${t("da decidere uno per uno")}`) : null))]);
+      tbody.append(tr);
+    }
+    put(holder, rows.length ? [h("p", {class: "t-sub"}, "Senza etichetta = proposta di Claude da controllare; le etichette dicono confermato, corretto o non riportato."), h("div", {class: "table-wrap"}, h("table", {class: "card-table obj-table"},
+      h("thead", null, h("tr", null, ["Articolo", ...OBJ_GROUPS.map(([g]) => g), "Azione"].map((c) => h("th", {scope: "col"}, c)))), tbody))]
+      : h("p", {class: "empty"}, objState.filtro === "da" ? "Niente da controllare: ogni valore è confermato, corretto o non riportato." : "Nessun articolo."));
+  }
+  const sel = h("select", {"aria-label": "Rivista", onchange: (e) => { objState.rivista = e.target.value; sections.obiettivi(); }},
+    h("option", {value: ""}, "Tutte le riviste"), d.riviste.map((j) => h("option", {value: j.id, selected: j.id === objState.rivista ? true : null}, j.titolo)));
+  put(view, ...head(t("Obiettivi e disegno"),
+    `${fmtN(d.articoli.length)} ${t("articoli con la scheda di obiettivo e disegno")} (${d.contratto}): ${fmtN(d.da_controllare)} ${t("valori da controllare")}, ${fmtN(d.esatte)} ${t("con la frase esatta (conferma in blocco)")}.`),
+    h("div", {class: "filters"}, seg([["da", "Da controllare"], ["v1", "Da completare (obiettivi-v1)"], ["tutti", "Tutti"]], objState.filtro,
+      (v) => { objState.filtro = v; sections.obiettivi(); }, "Filtro"), h("label", {class: "field"}, t("Rivista"), sel)),
+    d.da_completare ? h("p", {class: "t-sub"}, `${fmtN(d.da_completare)} ${t("schede scritte con obiettivi-v1: conviene confermarle dopo il completamento con i tipi nuovi (obiettivi.cmd, domanda «Schede vecchie da completare»).")}`) : null,
+    status, holder,
+    h("p", {class: "src"}, "Passa il mouse sul valore per vedere la frase e la pagina. «Conferma tutto l'articolo» conferma solo i valori con la frase trovata esattamente nel testo; gli altri si decidono uno per uno. Ogni modifica è una riga nuova: niente si cancella."),
+    srcLine(d));
+  draw();
+};
+
 sections.condivisione = async () => {
   const view = liveView;
   const d = await api("/api/condivisione");
@@ -1995,7 +2082,7 @@ for (const b of document.querySelectorAll("[data-lang-set]")) b.addEventListener
 /* modules: ORPHEUS (green) and EURYDIKE (red); lavora, condivisione and sistema are shared */
 const SHARED = ["funzioni", "condivisione", "sistema"];
 const NAV = {
-  orpheus: [["panoramica", "Panoramica"], ["articoli", "Articoli"], ["riviste", "Riviste"], ["manoscritti", "Manoscritti"],
+  orpheus: [["panoramica", "Panoramica"], ["articoli", "Articoli"], ["obiettivi", "Obiettivi e disegno"], ["riviste", "Riviste"], ["manoscritti", "Manoscritti"],
     ["sottomissioni", "Sottomissioni"], ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["funzioni", "Funzioni"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
   eurydike: [["eurydike/panoramica", "Panoramica"], ["eurydike/protocollo", "Protocollo"], ["eurydike/screening", "Screening"],
     ["eurydike/fulltext", "Full text"], ["eurydike/estrazione", "Estrazione (schede)"], ["eurydike/bias", "Rischio di bias"],

@@ -565,3 +565,11 @@ td .card-actions{flex-wrap:nowrap}
 @media (max-width:900px){.lay{grid-template-columns:minmax(0,1fr)}.lay-item,.lay-item.half{grid-column:1/-1}}
 .view-head{margin-bottom:18px}
 .view-head+.lede{margin-top:-12px}
+/* Obiettivi e disegno (2026-11-01): one row per article */
+.obj-table td{vertical-align:top;min-width:14ch}
+.obj-table th[scope=row]{min-width:22ch;max-width:34ch}
+.obj-table th[scope=row] .t-title,.obj-table th[scope=row] .t-sub{white-space:normal;overflow-wrap:anywhere}
+.obj-val .linklike{font-size:.85em}
+.obj-val{font-size:.9em;line-height:1.45;margin:0 0 4px}
+.obj-val [title]{text-decoration:underline dotted;text-underline-offset:3px;cursor:help}
+.obj-table .card-actions{flex-direction:column;align-items:flex-start;flex-wrap:wrap}

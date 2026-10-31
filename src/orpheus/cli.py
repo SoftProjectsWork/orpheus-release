@@ -131,10 +131,12 @@ Methods and statistics of the published articles (T-057; user's decisions of 202
                        text_method_item and text_structure; unchanged articles are left as they are
   profilo-rivista [SIGLA] [--voce TERM]  profile of the journals from their analysed articles (counts with N, per year);
                        with --voce the sentences behind one count; read-only
-  obiettivi [--pacchetti N] [--rivista SIGLA] [--controlla SCHEDA PACCHETTO] [--prova]  T-057c (obiettivi-v1): objective and design
-                       of the articles in cards-v2: the cards of rapporti/schede_obiettivi/da_inviare into the database
-                       as proposals (backup first), then packets in rapporti/pacchetti_obiettivi until N are open (sport,
-                       exercise and biomechanics first); --controlla: the checks on one card, nothing written
+  obiettivi [--pacchetti N] [--completa N] [--rivista SIGLA] [--controlla SCHEDA PACCHETTO] [--prova]  T-057c (obiettivi-v2):
+                       objective and design of the articles in cards-v2: the cards of rapporti/schede_obiettivi/da_inviare
+                       into the database as proposals (backup first), then packets in rapporti/pacchetti_obiettivi until
+                       N are open (sport, exercise and biomechanics first); --completa N: up to N completion packets of
+                       the cards written with obiettivi-v1 (natura_studio, replicazione, tipo_obiettivo again);
+                       --controlla: the checks on one card, nothing written
   riscontri [--controlla FILE PACCHETTO] [--prova]  T-056 (feedback-v1): the classifications of the comments of
                        editors and reviewers written by Claude (rapporti/riscontri/da_inviare) into the database as
                        proposals (backup first), then the packets of the letters still to classify; counts only (R10)
@@ -882,7 +884,7 @@ def cmd_journal_profile(args) -> int:
 
 
 def cmd_objectives(args) -> int:
-    """obiettivi (T-057c, obiettivi-v1): objective and design of the articles in the shared card cards-v2. --controlla:
+    """obiettivi (T-057c, obiettivi-v2): objective and design of the articles in the shared card cards-v2. --controlla:
     the checks on one card against its packet (no database, for Claude); else the cards in da_inviare (backup first),
     then new packets until --pacchetti are open (priority: sport, exercise and biomechanics first)."""
     from . import objectives
@@ -908,19 +910,23 @@ def cmd_objectives(args) -> int:
             raise CliError(f"Rivista {args.rivista} non trovata nell'elenco o nel database (sigla di "
                            f"riviste_prioritarie.csv, es. SJMSS)")
         out["rivista"] = args.rivista.strip().upper()
-    if args.pacchetti > objectives.MAX_OPEN:
+    if args.pacchetti > objectives.MAX_OPEN or args.completa > objectives.MAX_OPEN:
         raise CliError(f"Al massimo {objectives.MAX_OPEN} pacchetti aperti alla volta")
+    opened_c = objectives.open_packet_articles(ctx.conn, complete=True)
+    new_c = objectives.completion_candidates(ctx.conn)[:max(0, args.completa - len(opened_c))]
     files = objectives.to_send(ctx.home)
     the_lot = objectives.lot(ctx.conn, max(0, args.pacchetti), journal_id=journal_id)
     if args.prova:
         out |= {"modo": "prova", "schede_da_inviare": len(files), "pacchetti_aperti": len(the_lot["aperti"]),
                 "pacchetti_nuovi": len(the_lot["nuovi"]), "da_fare": the_lot["da_fare"], "sul_tema": the_lot["sul_tema"],
                 "non_studi_esclusi": len(the_lot["non_studi"]), "non_studi": the_lot["non_studi"][:40],
+                "completamenti_aperti": len(opened_c), "completamenti_nuovi": len(new_c),
+                "da_completare": len(objectives.completion_candidates(ctx.conn)) + len(opened_c),
                 "stato": objectives.status(ctx.conn)}
         _print({**out, **_finish(ctx, wrote=False)})
         return 0
     wrote = False
-    if files or the_lot["nuovi"]:
+    if files or the_lot["nuovi"] or new_c:
         entry = backups.make_backup(ctx.conn, ctx.state, reason="before_objectives")
         out["backup_prima_della_scrittura"] = str(ctx.state.backup_dir / entry["file"])
     if files:
@@ -930,9 +936,18 @@ def cmd_objectives(args) -> int:
     res = objectives.issue_packets(ctx.conn, ctx.home, the_lot["aperti"] + the_lot["nuovi"],
                                    project_name=ctx.project.name, project_version=ctx.project.version)
     wrote = wrote or bool(res.created_runs)
+    opened_c = objectives.open_packet_articles(ctx.conn, complete=True)
+    new_c = objectives.completion_candidates(ctx.conn)[:max(0, args.completa - len(opened_c))]
+    res_c = objectives.issue_packets(ctx.conn, ctx.home, opened_c + new_c, project_name=ctx.project.name,
+                                     project_version=ctx.project.version, complete=True)
+    wrote = wrote or bool(res_c.created_runs)
     objectives.to_send_dir(ctx.home).mkdir(parents=True, exist_ok=True)
     out |= {"pacchetti": [{k: p[k] for k in ("article_id", "titolo", "pagine", "nuovo_file")} for p in res.issued],
-            "pacchetti_aperti": len(res.issued), "esecuzioni_nuove": res.created_runs, "problemi": res.problems,
+            "pacchetti_aperti": len(res.issued), "esecuzioni_nuove": res.created_runs,
+            "problemi": res.problems + res_c.problems,
+            "completamenti": [{k: p[k] for k in ("article_id", "titolo", "pagine", "nuovo_file")} for p in res_c.issued],
+            "completamenti_aperti": len(res_c.issued), "completamenti_nuovi": res_c.created_runs,
+            "da_completare_dopo": len(objectives.completion_candidates(ctx.conn)),
             "da_fare_dopo": the_lot["restano_dopo"], "sul_tema": the_lot["sul_tema"],
             "aperti_della_rivista": (the_lot["aperti_della_rivista"] or 0) + len(the_lot["nuovi"])
             if journal_id else None,
@@ -941,7 +956,7 @@ def cmd_objectives(args) -> int:
             "cartella_schede_da_inviare": str(objectives.to_send_dir(ctx.home)),
             "stato": objectives.status(ctx.conn)}
     _print({**out, **_finish(ctx, wrote=wrote)})
-    return 0 if not res.problems else 3
+    return 0 if not (res.problems or res_c.problems) else 3
 
 
 def cmd_feedback(args) -> int:
@@ -2338,6 +2353,8 @@ def main(argv: list[str] | None = None) -> int:
                                      "(up to --pacchetti open of that journal; the other open packets stay)")
     p.add_argument("--controlla", nargs=2, metavar=("SCHEDA", "PACCHETTO"),
                    help="check one card against its packet, nothing written (for Claude)")
+    p.add_argument("--completa", type=int, default=0,
+                   help="completion packets (obiettivi-v2 fields) of the cards written with obiettivi-v1 open after the run")
     p.add_argument("--prova", action="store_true", help="what would be sent and issued; nothing written")
     p.set_defaults(func=cmd_objectives)
     p = sub.add_parser("riscontri")

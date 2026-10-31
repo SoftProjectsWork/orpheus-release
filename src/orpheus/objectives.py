@@ -40,11 +40,15 @@ from .eurydike import store as v2store
 from .ids import new_id
 from .quality import REPORTS_DIR
 
-CONTRACT = "obiettivi-v1"
-PACKET_FORMAT = "orpheus-pacchetto-obiettivi-v1"
+CONTRACT = "obiettivi-v2"          # 2026-11-01: taxonomy v2 approved by the user on 2026-10-31 23:07 (ADR-0015)
+CONTRACTS = ("obiettivi-v1", "obiettivi-v2")   # packets of both are accepted; the cards are always checked with v2
+PACKET_FORMAT = "orpheus-pacchetto-obiettivi-v2"
 PACKETS_DIR = "pacchetti_obiettivi"
 CARDS_DIR = "schede_obiettivi"
-TASK_KEY = "T-057c:" + CONTRACT + ":{article_id}"
+TASK_KEY = "T-057c:obiettivi-v1:{article_id}"      # stable identity of the task of an article (not the contract)
+COMPLETE_KEY = "T-057c:obiettivi-v2-completa:{article_id}"
+# completion of the cards written with obiettivi-v1 (2026-11-01): the two new fields and the objective type again
+COMPLETE_FIELDS = ("tipo_obiettivo", "natura_studio", "replicazione")
 SEED = "orpheus-T-057c-v1"
 PER_SESSION = 10
 MAX_OPEN = 50          # 2026-10-28: the user may open 30-50 packets at a time
@@ -55,9 +59,16 @@ DESIGN_FIELDS = ("disegno_tempi", "disegno_gruppi", "stessi_soggetti", "crossove
 OBJECTIVE_IT = {"confronto_gruppi": "Confronto tra gruppi",
                 "confronto_condizioni": "Confronto tra condizioni o arti negli stessi soggetti",
                 "effetto_intervento": "Effetto di un intervento (pre-post, con o senza controllo)",
+                "andamento_nel_tempo": "Andamento nel tempo (misure ripetute senza intervento)",
                 "associazione_predizione": "Associazione o predizione",
-                "affidabilita_validita": "Affidabilità o validità",
-                "descrittivo": "Descrittivo"}
+                "affidabilita": "Affidabilità",
+                "validita": "Validità",
+                "descrittivo": "Descrittivo",
+                "affidabilita_validita": "Affidabilità o validità (obiettivi-v1, da riclassificare)"}
+NATURE_IT = {"rct": "RCT a gruppi paralleli", "crossover": "Crossover", "non_randomizzato": "Intervento non randomizzato",
+             "coorte": "Coorte", "caso_controllo": "Caso-controllo", "trasversale": "Trasversale",
+             "serie_di_casi": "Serie di casi o caso singolo", "indagine": "Indagine o questionario",
+             "qualitativo": "Qualitativo", "altro": "Altro"}
 COUNT_IT = {"uno": "uno", "due": "due", "piu_di_due": "più di due"}
 YES_NO_IT = {"si": "sì", "no": "no"}
 METHOD_GROUPS = ("confronto", "modello", "approccio", "affidabilita")
@@ -78,6 +89,34 @@ NON_STUDY_LABEL = re.compile(
     r"OPINION|Current [Oo]pinion|CURRENT OPINION|Leading [Aa]rticle|LEADING ARTICLE|Narrative [Rr]eview|NARRATIVE REVIEW|"
     r"Infographic|INFOGRAPHIC|Point of [Vv]iew|POINT OF VIEW|Debate|DEBATE)(?=\s|$)")
 LABEL_CHARS = 600
+# 2026-11-01 (point 3 of the user's list): the rule "no Methods section and no statistical method" left out true studies
+# whose Methods heading the section rules did not recognise (e.g. «Methods and Procedures», «Material y métodos») or
+# whose statistics have no known name (e.g. «Comparison of nerve conduction velocities… between runners and controls»).
+# Such an article stays in when its text shows a study: a Methods heading on a line of its own, or a p value together
+# with a sample ("14 male runners", "A survey was performed"). Case reports and narrative texts have neither.
+METHODS_HEADING = re.compile(
+    r"^[ \t]*(?:\d+\.?\s*)?(?:Materials?,? and [Mm]ethods?|MATERIALS? AND METHODS?|Methods? and [Pp]rocedures?|"
+    r"(?:Subjects|Participants|Patients) and [Mm]ethods?|Methods?|METHODS?|Methodology|"
+    r"Material(?:es)? y m[ée]todos?|Pacientes y m[ée]todos?)[ \t]*$", re.M)
+P_VALUE = re.compile(r"\b[pP]\s?[<=≤]\s?0?\.\d")
+SAMPLE = re.compile(
+    r"\b(?:\d+|[Tt]wo|[Tt]hree|[Ff]our|[Ff]ive|[Ss]ix|[Ss]even|[Ee]ight|[Nn]ine|[Tt]en|[Ee]leven|[Tt]welve|"
+    r"[A-Z][a-z]+teen|[A-Z][a-z]+ty(?:-[a-z]+)?)\s+(?:[\w-]+\s+){0,4}?"
+    r"(?:participants|subjects|patients|players|athletes|runners|volunteers|respondents|footballers|surgeons|children|"
+    r"adults|women|men)\s+(?:were|was|participated|took part|completed|returned|responded|aged|with|from)\b"
+    r"|\b(?:[Aa] survey was (?:performed|conducted|carried out)|[Aa] questionnaire was (?:distributed|sent|administered)|"
+    r"surveys were returned|were surveyed)\b")
+
+
+def study_signals(text: str) -> str | None:
+    """Why the text looks like a study although the section rules found no Methods (or None)."""
+    m = METHODS_HEADING.search(text)
+    if m:
+        return f"titolo dei Metodi «{m.group(0).strip()}»"
+    s = SAMPLE.search(text)
+    if s and P_VALUE.search(text):
+        return f"valore p e campione «{' '.join(s.group(0).split())}»"
+    return None
 
 
 INSTRUCTIONS = [
@@ -96,10 +135,20 @@ INSTRUCTIONS = [
     "disegno_gruppi = groups or arms between subjects (a single sample = 'uno'; a crossover study usually 'uno'); "
     "stessi_soggetti = the same subjects measured at every time point or condition; crossover = every subject gets "
     "every condition in sequence.",
-    "Coherence checked by ORPHEUS: crossover 'si' -> stessi_soggetti 'si'; effetto_intervento -> two or more time "
-    "points, or two or more groups, or crossover; confronto_gruppi -> two or more groups or crossover 'si'; "
-    "confronto_condizioni (limbs, shoes, conditions compared in the same subjects, also in one session) -> "
-    "stessi_soggetti 'si'.",
+    "Rule for conditions and interventions (obiettivi-v2): acute conditions compared in the same subjects in one session "
+    "or a short series (shoes, insoles, braces worn for the test, limbs, speeds, surfaces, fatigue protocols) -> "
+    "confronto_condizioni; a before-after with an intervention lasting beyond the test session (training, treatment, "
+    "surgery, a programme) -> effetto_intervento. Repeated measures of the same subjects without an intervention "
+    "(during a race, across the phases of a cycle, over a season) -> andamento_nel_tempo. affidabilita = repeatability "
+    "or agreement of a measure; validita = agreement with a criterion, construct or content (both: classify the main "
+    "one, the other as an 'obiettivo' row).",
+    "natura_studio = the nature of the study (one key of 'valori'); 'altro' only with the reason in 'nota'. "
+    "replicazione = 'si' only when the article says it replicates an earlier study (quote that sentence); otherwise "
+    "'no' with the aim sentence as quote, origin 'interpreted'.",
+    "Coherence checked by ORPHEUS: crossover 'si' <-> natura_studio 'crossover' and -> stessi_soggetti 'si'; natura_studio "
+    "'rct' -> two or more groups; effetto_intervento -> two or more time points, or two or more groups, or crossover; "
+    "confronto_gruppi -> two or more groups or crossover 'si'; confronto_condizioni -> stessi_soggetti 'si'; "
+    "andamento_nel_tempo -> two or more time points, one group, stessi_soggetti 'si'.",
     "analisi_principale = the test or model used for the primary outcome, as written (e.g. 'paired t-test', "
     "'two-way repeated-measures ANOVA'). 'voci_livello_1' lists what the deterministic rules found in this article, "
     "with page and sentence: a help, never a substitute for reading the Methods.",
@@ -142,11 +191,21 @@ def done_articles(conn: sqlite3.Connection) -> set[str]:
                                        "AND superseded_by IS NULL")}
 
 
-def open_packet_articles(conn: sqlite3.Connection) -> list[str]:
-    prefix = TASK_KEY.format(article_id="")
+def open_packet_articles(conn: sqlite3.Connection, *, complete: bool = False) -> list[str]:
+    prefix = (COMPLETE_KEY if complete else TASK_KEY).format(article_id="")
     return [r[0][len(prefix):] for r in conn.execute(
         """SELECT DISTINCT t.idempotency_key FROM workflow_run w JOIN task t ON t.id = w.task_id
            WHERE w.status = 'running' AND t.idempotency_key LIKE ? ORDER BY t.idempotency_key""", (prefix + "%",))]
+
+
+def completion_candidates(conn: sqlite3.Connection) -> list[str]:
+    """Articles with the objective in the card but without the new fields of obiettivi-v2 (natura_studio), no open
+    completion packet, in a fixed order (sha256 of SEED). Read-only."""
+    have = {r[0] for r in conn.execute("SELECT DISTINCT article_id FROM card_item WHERE field_key = 'natura_studio' "
+                                       "AND superseded_by IS NULL")}
+    skip = have | set(open_packet_articles(conn, complete=True))
+    return sorted((a for a in done_articles(conn) if a not in skip),
+                  key=lambda a: hashlib.sha256(f"{SEED}:{a}".encode()).hexdigest())
 
 
 def topic_rank(title: str | None, abstract: str | None, mesh: list[str], journal: str | None) -> int:
@@ -173,7 +232,10 @@ def non_study(conn: sqlite3.Connection, article_id: str, document_id: str) -> st
                              AND grp IN ({",".join("?" * len(METHOD_GROUPS))})""",
                          (article_id, stats_terms.RULES_VERSION, *METHOD_GROUPS)).fetchone()[0]
         if not n:
-            return "senza sezione Metodi e senza metodi statistici"
+            text = "\n".join(r[0] or "" for r in conn.execute(
+                "SELECT text FROM document_page WHERE document_id = ? ORDER BY page_no", (document_id,)))
+            if study_signals(text) is None:
+                return "senza sezione Metodi e senza metodi statistici"
     return None
 
 
@@ -262,18 +324,31 @@ def level1_items(conn: sqlite3.Connection, aid: str) -> list[dict]:
             if r["grp"] in METHOD_GROUPS]
 
 
-def fields_spec() -> dict:
+def fields_spec(fields: tuple[str, ...] = FIELDS) -> dict:
     return {k: {kk: (list(vv) if isinstance(vv, tuple) else vv) for kk, vv in cards_v2.NEW_FIELDS[k].items()}
-            for k in FIELDS}
+            for k in fields}
 
 
-def packet(meta: dict, task_id: str, run: dict, pages: dict[int, str], items: list[dict]) -> dict:
-    return {"formato": PACKET_FORMAT, "contratto": CONTRACT, "versione_scheda": cards_v2.VERSION,
-            "task_id": task_id, "workflow_run_id": run["id"], "article_id": meta["article_id"],
-            "emesso_il": run["started_at"], "hash_testo": run["parameters"]["text_sha256"],
-            "documento": run["parameters"]["document_id"], "articolo": meta, "istruzioni": INSTRUCTIONS,
-            "campi": fields_spec(), "esempio": EXAMPLE, "voci_livello_1": items,
-            "testo": {"pagine": [{"pagina": k, "testo": pages[k]} for k in sorted(pages)]}}
+COMPLETE_INSTRUCTION = ("COMPLETION of a card written with obiettivi-v1: write ONLY the fields of 'campi' (the others are "
+                        "already in the card, see 'valori_attuali'; they are used for the coherence checks). "
+                        "tipo_obiettivo again with the types of obiettivi-v2 (e.g. 'affidabilita_validita' -> "
+                        "'affidabilita' or 'validita'; repeated measures without intervention -> 'andamento_nel_tempo').")
+
+
+def packet(meta: dict, task_id: str, run: dict, pages: dict[int, str], items: list[dict], *,
+           current: dict | None = None) -> dict:
+    params = run["parameters"]
+    fields = tuple(params["campi"]) if params.get("completamento") else FIELDS
+    out = {"formato": PACKET_FORMAT, "contratto": CONTRACT, "versione_scheda": cards_v2.VERSION,
+           "task_id": task_id, "workflow_run_id": run["id"], "article_id": meta["article_id"],
+           "emesso_il": run["started_at"], "hash_testo": params["text_sha256"],
+           "documento": params["document_id"], "articolo": meta,
+           "istruzioni": ([COMPLETE_INSTRUCTION] if params.get("completamento") else []) + INSTRUCTIONS,
+           "campi": fields_spec(fields), "esempio": EXAMPLE, "voci_livello_1": items,
+           "testo": {"pagine": [{"pagina": k, "testo": pages[k]} for k in sorted(pages)]}}
+    if params.get("completamento"):
+        out |= {"completamento": True, "valori_attuali": current or {}}
+    return out
 
 
 def _text(conn: sqlite3.Connection, doc: str | None, aid: str) -> tuple[dict[int, str], str]:
@@ -282,8 +357,10 @@ def _text(conn: sqlite3.Connection, doc: str | None, aid: str) -> tuple[dict[int
 
 
 def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], *, project_name: str = "ORPHEUS",
-                  project_version: str = "", actor: str = "orpheus obiettivi") -> card_store.PacketResult:
-    """Tasks, runs and packet files (idempotent: an open packet with the same text is written again, not duplicated)."""
+                  project_version: str = "", actor: str = "orpheus obiettivi",
+                  complete: bool = False) -> card_store.PacketResult:
+    """Tasks, runs and packet files (idempotent: an open packet with the same text is written again, not duplicated).
+    `complete`: completion packets of cards already written with obiettivi-v1 (only COMPLETE_FIELDS not yet decided)."""
     res = card_store.PacketResult()
     done = done_articles(conn)
     plan = []
@@ -291,8 +368,11 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
         if not conn.execute("SELECT 1 FROM article WHERE id = ?", (aid,)).fetchone():
             res.problems.append({"article_id": aid, "problema": "articolo non trovato nel database"})
             continue
-        if aid in done:
+        if not complete and aid in done:
             res.skipped.append({"article_id": aid, "motivo": "obiettivo già nella scheda"})
+            continue
+        if complete and aid not in done:
+            res.skipped.append({"article_id": aid, "motivo": "obiettivo non ancora nella scheda (pacchetto normale)"})
             continue
         doc = _document(conn, aid)
         if doc is None:
@@ -307,7 +387,9 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
             agent_id = card_store._ensure_agent(conn)
             model_id = card_store._ensure_model(conn, card_store.GENERIC_MODEL)
         for aid, doc, pages, sha in plan:
-            key = TASK_KEY.format(article_id=aid)
+            key = (COMPLETE_KEY if complete else TASK_KEY).format(article_id=aid)
+            decided = cards_v2.decided_keys(conn, aid) if complete else set()
+            wanted = [f for f in COMPLETE_FIELDS if (f, 1) not in decided] if complete else None
             task = conn.execute("SELECT id FROM task WHERE idempotency_key = ?", (key,)).fetchone()
             if task is None:
                 task_id = new_id("task")
@@ -325,7 +407,8 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
             for r in conn.execute("""SELECT * FROM workflow_run WHERE task_id = ? AND status = 'running'
                                      ORDER BY started_at DESC, rowid DESC""", (task_id,)):
                 params = json.loads(r["parameters"])
-                if params.get("text_sha256") == sha and params.get("document_id") == doc and run is None:
+                if params.get("text_sha256") == sha and params.get("document_id") == doc and run is None \
+                        and params.get("campi", wanted) == wanted:
                     run = {"id": r["id"], "started_at": r["started_at"], "parameters": params}
                 else:
                     conn.execute("""UPDATE workflow_run SET status = 'cancelled', finished_at = ?,
@@ -334,6 +417,8 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
                 params = {"card_version": cards_v2.VERSION, "contratto": CONTRACT, "article_id": aid, "document_id": doc,
                           "text_sha256": sha, "pagine": len(pages),
                           "packet_file": f"{REPORTS_DIR}/{PACKETS_DIR}/{aid}.json"}
+                if complete:
+                    params |= {"completamento": True, "campi": wanted}
                 run = {"id": new_id("workflow_run"), "started_at": audit.utc_now(), "parameters": params}
                 conn.execute("""INSERT INTO workflow_run (id, task_id, agent_id, executor, model_id, started_at, status,
                                                           parameters, validation_status)
@@ -344,11 +429,13 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
             written.append((aid, task_id, run, doc, pages))
         if plan:
             audit.record(conn, actor=actor, action="objective_packets_issued", payload={
-                "contract": CONTRACT, "articles": [w[0] for w in written], "new_runs": res.created_runs},
+                "contract": CONTRACT, "articles": [w[0] for w in written], "new_runs": res.created_runs,
+                "completion": complete},
                 in_transaction=True)
     for aid, task_id, run, doc, pages in written:
         meta = card_store._metadata(conn, aid, doc)
-        data = json.dumps(packet(meta, task_id, run, pages, level1_items(conn, aid)), ensure_ascii=False,
+        data = json.dumps(packet(meta, task_id, run, pages, level1_items(conn, aid),
+                                 current=current_choices(conn, aid) if complete else None), ensure_ascii=False,
                           indent=1).encode("utf-8")
         path = packets_dir(home) / f"{aid}.json"
         changed = card_store._write_if_changed(path, data)
@@ -358,12 +445,26 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
 
 
 # ---------------------------------------------------------------- checks
-def check_design(card) -> CheckResult:
-    """Coherence of the choice fields between them (only when both sides are written)."""
-    val = {v.campo: v.valore for v in card.valori if v.campo in CHOICE_FIELDS and v.origin != "not_available"}
+def check_design(card, current: dict[str, str] | None = None) -> CheckResult:
+    """Coherence of the choice fields between them (only when both sides are written). `current`: the values already
+    in the card of the article (a completion card writes only some fields; the others come from there)."""
+    val = dict(current or {})
+    val.update({v.campo: v.valore for v in card.valori if v.campo in CHOICE_FIELDS and v.origin != "not_available"})
+    for v in card.valori:
+        if v.campo in CHOICE_FIELDS and v.origin == "not_available":
+            val.pop(v.campo, None)
     probs = []
     if val.get("crossover") == "si" and val.get("stessi_soggetti") == "no":
         probs.append("crossover 'si' ma stessi_soggetti 'no': in un crossover gli stessi soggetti ricevono ogni condizione")
+    nat = val.get("natura_studio")
+    if nat == "crossover" and val.get("crossover") == "no" or nat not in (None, "crossover") and val.get("crossover") == "si":
+        probs.append("natura_studio e crossover non concordano: natura 'crossover' se e solo se crossover 'si'")
+    if nat == "rct" and val.get("disegno_gruppi") == "uno":
+        probs.append("natura_studio 'rct' con un solo gruppo: un RCT a gruppi paralleli ha due o più gruppi "
+                     "(un crossover randomizzato è natura 'crossover')")
+    for v in card.valori:
+        if v.campo == "natura_studio" and v.valore == "altro" and not v.nota:
+            probs.append("natura_studio 'altro': scrivi il motivo in 'nota'")
     tipo = val.get("tipo_obiettivo")
     if tipo == "effetto_intervento" and val.get("disegno_tempi") == "uno" and val.get("disegno_gruppi") == "uno" \
             and val.get("crossover") != "si":
@@ -374,6 +475,14 @@ def check_design(card) -> CheckResult:
     if tipo == "confronto_gruppi" and val.get("disegno_gruppi") == "uno" and val.get("crossover") != "si":
         probs.append("confronto_gruppi con un solo gruppo: indica i gruppi (o confronto_condizioni se le condizioni sono "
                      "negli stessi soggetti)")
+    if tipo == "andamento_nel_tempo":
+        if val.get("disegno_tempi") == "uno":
+            probs.append("andamento_nel_tempo con un solo tempo: servono due o più tempi di misura")
+        if val.get("disegno_gruppi") in ("due", "piu_di_due"):
+            probs.append("andamento_nel_tempo con più gruppi: è un solo gruppo seguito nel tempo (con più gruppi "
+                         "confronto_gruppi)")
+        if val.get("stessi_soggetti") == "no":
+            probs.append("andamento_nel_tempo con stessi_soggetti 'no': si misurano gli stessi soggetti nel tempo")
     return CheckResult("coerenza_disegno", not probs, probs)
 
 
@@ -389,11 +498,22 @@ def _strict(card, pages: dict[int, str]) -> list[CheckResult]:
 
 
 def validate(data, pages: dict[int, str], *, decided: set[tuple[str, int]] = frozenset(),
-             packet_check: CheckResult | None = None) -> Outcome:
-    out = cards_v2.validate(data, pages, {}, wanted=FIELDS, decided=decided, packet_check=packet_check)
+             packet_check: CheckResult | None = None, wanted: tuple[str, ...] = FIELDS,
+             current: dict[str, str] | None = None) -> Outcome:
+    out = cards_v2.validate(data, pages, {}, wanted=wanted, decided=decided, packet_check=packet_check)
     if out.card is None:
         return out
-    return Outcome(out.checks + _strict(out.card, pages) + [check_design(out.card)], out.card)
+    return Outcome(out.checks + _strict(out.card, pages) + [check_design(out.card, current)], out.card)
+
+
+def current_choices(conn: sqlite3.Connection, aid: str) -> dict[str, str]:
+    """The choice values already in the card of the article (current, not 'not reported')."""
+    return {r["field_key"]: r["value"] for r in v2store.current_items(conn, aid)
+            if r["field_key"] in CHOICE_FIELDS and r["item_ord"] == 1 and r["value"] not in (None, "not reported")}
+
+
+def _wanted(params: dict) -> tuple[str, ...]:
+    return tuple(params["campi"]) if params.get("completamento") and params.get("campi") else FIELDS
 
 
 def check_with_packet(card_data, packet_data: dict) -> Outcome:
@@ -403,7 +523,8 @@ def check_with_packet(card_data, packet_data: dict) -> Outcome:
     for k in ("workflow_run_id", "article_id"):
         if not isinstance(card_data, dict) or card_data.get(k) != packet_data.get(k):
             probs.append(f"{k} diverso da quello del pacchetto")
-    return validate(card_data, pages, packet_check=CheckResult("pacchetto", not probs, probs))
+    return validate(card_data, pages, packet_check=CheckResult("pacchetto", not probs, probs),
+                    wanted=_wanted(packet_data), current=packet_data.get("valori_attuali"))
 
 
 # ---------------------------------------------------------------- submit
@@ -422,8 +543,8 @@ def _prepare(conn: sqlite3.Connection, path: Path) -> card_store.Submission:
         s.stop = "workflow_run_id mancante o non trovato in questo database (copialo dal pacchetto)"
         return s
     s.params = json.loads(s.run["parameters"] or "{}")
-    if s.params.get("contratto") != CONTRACT:
-        s.stop = f"l'esecuzione {run_id} non è un pacchetto {CONTRACT}"
+    if s.params.get("contratto") not in CONTRACTS:
+        s.stop = f"l'esecuzione {run_id} non è un pacchetto di obiettivi ({', '.join(CONTRACTS)})"
     elif s.run["status"] == "succeeded":
         s.stop = "scheda già accettata per questo pacchetto"
     elif s.run["status"] != "running":
@@ -442,7 +563,8 @@ def submit_one(conn: sqlite3.Connection, s: card_store.Submission, *, actor: str
     if v2store._document_of(conn, aid) != s.params.get("document_id"):
         probs.append("il PDF della scheda dell'articolo è cambiato dopo il pacchetto: rilancia obiettivi.cmd")
     outcome = validate(s.data, pages, decided=cards_v2.decided_keys(conn, aid),
-                       packet_check=CheckResult("pacchetto", not probs, probs))
+                       packet_check=CheckResult("pacchetto", not probs, probs), wanted=_wanted(s.params),
+                       current=current_choices(conn, aid))
     out = {"file": s.path.name, "article_id": aid, "workflow_run_id": s.run["id"],
            "esito": "accettata" if outcome.accepted else "rifiutata",
            "controlli": {c.name: ("ok" if c.ok else "non superato") for c in outcome.checks}}
@@ -511,3 +633,79 @@ def status(conn: sqlite3.Connection) -> dict:
         items.setdefault(r[0], {})[r[1]] = r[2]
     return {"contratto": CONTRACT, "articoli_con_obiettivo": len(done_articles(conn)),
             "pacchetti_aperti": len(open_packet_articles(conn)), "valori": items}
+
+
+# ---------------------------------------------------------------- quick confirmation in the dashboard (2026-11-01)
+# Point 2 of the user's list: one row per article, «Conferma tutto l'articolo» (only the values of this contract still
+# proposed whose quote was found exactly in the text, like the bulk confirmation of EURYDIKE) and «Correggi» per field.
+# No migration: the decisions are card_item rows written by store.set_item (supersede, never DELETE).
+ROW_FIELDS = ("obiettivo", "tipo_obiettivo", "natura_studio", "disegno_tempi", "disegno_gruppi", "stessi_soggetti",
+              "crossover", "replicazione", "esito_primario", "analisi_principale", "effetto_principale")
+FIELD_IT = {"obiettivo": "Obiettivo", "tipo_obiettivo": "Tipo di obiettivo", "natura_studio": "Natura dello studio",
+            "disegno_tempi": "Tempi", "disegno_gruppi": "Gruppi", "stessi_soggetti": "Stessi soggetti",
+            "crossover": "Crossover", "replicazione": "Replicazione", "esito_primario": "Esito primario",
+            "analisi_principale": "Analisi principale", "effetto_principale": "Effetto principale"}
+
+
+def choice_labels() -> dict[str, list[list[str]]]:
+    """Allowed values of the choice fields with the Italian labels (the old v1 type is not offered)."""
+    it = {"tipo_obiettivo": OBJECTIVE_IT, "natura_studio": NATURE_IT, "disegno_tempi": COUNT_IT,
+          "disegno_gruppi": COUNT_IT, "stessi_soggetti": YES_NO_IT, "crossover": YES_NO_IT, "replicazione": YES_NO_IT}
+    return {k: [[v, it[k].get(v, v)] for v in cards_v2.NEW_FIELDS[k]["valori"]] for k in CHOICE_FIELDS}
+
+
+def review_rows(conn: sqlite3.Connection, journal_id: str | None = None) -> dict:
+    """Every article with an objective in the card, with the values of this contract (current), their state and
+    quote, and how many are still to check / confirmable in bulk. Read-only."""
+    labels = {k: dict(v) for k, v in choice_labels().items()}
+    labels["tipo_obiettivo"].update(OBJECTIVE_IT)
+    done = done_articles(conn)
+    meta = {r["id"]: r for r in conn.execute(
+        """SELECT a.id, a.title, a.publication_year, a.doi, a.journal_id, j.title AS journal
+           FROM article a LEFT JOIN journal j ON j.id = a.journal_id""") if r["id"] in done}
+    marks = ",".join("?" * len(ROW_FIELDS))
+    items: dict[str, dict[str, list[dict]]] = {}
+    for r in conn.execute(f"""SELECT article_id, field_key, item_ord, value, state, quote_check, quote, page_no, note
+                              FROM card_item WHERE superseded_by IS NULL AND field_key IN ({marks})
+                              ORDER BY article_id, field_key, item_ord""", ROW_FIELDS):
+        if r["article_id"] in meta:
+            items.setdefault(r["article_id"], {}).setdefault(r["field_key"], []).append({
+                "ordine": r["item_ord"], "valore": r["value"], "etichetta": labels.get(r["field_key"], {}).get(r["value"]),
+                "stato": r["state"], "controllo_citazione": r["quote_check"], "citazione": r["quote"],
+                "pagina": r["page_no"], "nota": r["note"]})
+    rows = []
+    for aid, a in meta.items():
+        if journal_id and a["journal_id"] != journal_id:
+            continue
+        f = items.get(aid, {})
+        flat = [x for xs in f.values() for x in xs]
+        rows.append({"id": aid, "titolo": a["title"], "anno": a["publication_year"], "doi": a["doi"],
+                     "rivista": a["journal"], "journal_id": a["journal_id"], "campi": f,
+                     "da_controllare": sum(x["stato"] == "ai" for x in flat),
+                     "esatte": sum(x["stato"] == "ai" and x["controllo_citazione"] == "exact" for x in flat),
+                     "v1": any(x["valore"] == "affidabilita_validita" for x in f.get("tipo_obiettivo", []))
+                           or "natura_studio" not in f})
+    rows.sort(key=lambda r: (-r["da_controllare"], (r["rivista"] or ""), (r["titolo"] or "").lower()))
+    journals = sorted({(r["journal_id"], r["rivista"]) for r in rows if r["journal_id"]}, key=lambda x: x[1] or "")
+    return {"articoli": rows, "campi": [[k, FIELD_IT[k]] for k in ROW_FIELDS], "scelte": choice_labels(),
+            "riviste": [{"id": j, "titolo": t} for j, t in journals], "contratto": CONTRACT,
+            "da_controllare": sum(r["da_controllare"] for r in rows), "esatte": sum(r["esatte"] for r in rows),
+            "da_completare": sum(r["v1"] for r in rows)}
+
+
+def confirm_article(conn: sqlite3.Connection, article_id: str, *, actor: str = "user") -> dict:
+    """«Conferma tutto l'articolo»: confirm the proposed values of this contract whose quote was found exactly. The
+    others (similar or missing quote, proposed 'not reported') stay to be decided one by one."""
+    todo = [r for r in v2store.current_items(conn, article_id)
+            if r["field_key"] in ROW_FIELDS and r["state"] == "ai" and r["quote_check"] == "exact"]
+    for r in todo:
+        v2store.set_item(conn, article_id, r["field_key"], state="confirmed", item_ord=r["item_ord"], actor=actor)
+    left = sum(r["state"] == "ai" for r in v2store.current_items(conn, article_id) if r["field_key"] in ROW_FIELDS)
+    return {"confermati": len(todo), "restano_da_controllare": left}
+
+
+def check_correction(field: str, value: str | None) -> None:
+    """A correction of a choice field takes one of the allowed values (raises StoreError)."""
+    spec = cards_v2.NEW_FIELDS.get(field, {})
+    if spec.get("tipo") == "scelta" and value is not None and str(value).strip() not in spec["valori"]:
+        raise v2store.StoreError(f"valore non ammesso per {field}: scegli uno di {', '.join(spec['valori'])}")
