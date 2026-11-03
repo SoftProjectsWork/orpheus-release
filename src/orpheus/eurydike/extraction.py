@@ -338,6 +338,7 @@ def issue_packets(conn: sqlite3.Connection, home: Path, review_id: str, n: int, 
     if n > MAX_OPEN:
         raise ExtractionError(f"al massimo {MAX_OPEN} pacchetti aperti alla volta")
     f, _fields_ = _frozen(conn, review_id)
+    link_articles(conn, review_id)
     sc.claude_reviewer(conn, review_id)
     opened = open_packets(conn, review_id)
     todo = to_extract(conn, review_id)[:max(0, n - len(opened))]

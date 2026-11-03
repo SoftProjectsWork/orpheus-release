@@ -85,21 +85,51 @@ def _first_pages(conn: sqlite3.Connection, document_id: str, n: int = 2) -> str:
 
 def _norm(text: str) -> str:
     t = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower()
+    t = re.sub(r"(?<=[a-z])-\s*\n\s*(?=[a-z])", "", t)              # words cut at the end of a line
     return re.sub(r"[^a-z0-9]+", " ", t).strip()
 
 
+_DOI_IN_TEXT = re.compile(r"10\.\d{4,9}/[^\s\"<>]+", re.I)
+
+
+def _dois_of(conn: sqlite3.Connection, document_id: str, doi: str | None) -> set[str]:
+    """Every DOI that can tell which study a PDF is: the candidate of the reading (also for a PDF already read by
+    ORPHEUS, «duplicate»), the DOI of its verified article, and every DOI printed on the first two pages."""
+    out = {doi} if doi else set()
+    d = conn.execute("SELECT d.doi_candidate, a.doi FROM document d LEFT JOIN article a ON a.id = d.article_id "
+                     "WHERE d.id = ?", (document_id,)).fetchone()
+    if d:
+        out |= {x for x in (d[0], d[1]) if x}
+    out |= {m.group(0).rstrip(".,;)]") for m in _DOI_IN_TEXT.finditer(_first_pages(conn, document_id))}
+    return {c for c in (core_records.clean_doi(x) for x in out) if c}
+
+
+def _title_score(title: str, page: str) -> float:
+    """1.0 when the whole title is in the first pages; else the share of its words (≥ 3 letters) found there."""
+    t = _norm(title)
+    if len(t) >= 25 and t in page:
+        return 1.0
+    words = [w for w in t.split() if len(w) >= 3]
+    if len(words) < 4:
+        return 0.0
+    have = set(page.split())
+    return sum(1 for w in words if w in have) / len(words)
+
+
 def _match_study(conn: sqlite3.Connection, review_id: str, document_id: str, doi: str | None) -> str | None:
-    """The study of a PDF: same DOI as the record, else the record title (≥ 25 characters) on the first two pages."""
+    """The study of a PDF: same DOI as the record (candidate, verified article or printed on the first pages), else the
+    record title on the first three pages (whole, or ≥ 90% of its words) when only one study fits."""
     studies = conn.execute("""SELECT s.id, r.doi, r.title FROM review_study s JOIN review_record r ON r.id = s.record_id
                               WHERE s.review_id = ? AND s.document_id IS NULL""", (review_id,)).fetchall()
-    d = core_records.clean_doi(doi)
-    if d:
-        for s in studies:
-            if core_records.clean_doi(s["doi"]) == d:
-                return s["id"]
-    page = _norm(_first_pages(conn, document_id))
-    hits = [s["id"] for s in studies if len(_norm(s["title"])) >= 25 and _norm(s["title"]) in page]
-    return hits[0] if len(hits) == 1 else None
+    dois = _dois_of(conn, document_id, doi)
+    hits = [s["id"] for s in studies if core_records.clean_doi(s["doi"]) in dois] if dois else []
+    if len(hits) == 1:
+        return hits[0]
+    page = _norm(_first_pages(conn, document_id, 3))
+    scores = sorted(((_title_score(s["title"] or "", page), s["id"]) for s in studies), reverse=True)
+    if scores and scores[0][0] >= 0.9 and (len(scores) == 1 or scores[1][0] < 0.9):
+        return scores[0][1]
+    return None
 
 
 def link_document(conn: sqlite3.Connection, review_id: str, study_id: str, document_id: str, *, actor: str = "user") -> None:
@@ -146,6 +176,8 @@ def read_pdfs(conn: sqlite3.Connection, home: Path, review_id: str, *, archive_d
             else:
                 item["collegato"], item["documento"] = "no", res.document_id
         out.append(item)
+    from .extraction import link_articles
+    link_articles(conn, review_id, actor=actor)                  # studies whose PDF now has a verified article
     return {"file": out, "cartella": str(ft_dir(conn, home, review_id)),
             "da_collegare": [x for x in out if x.get("collegato") == "no"]}
 
@@ -419,6 +451,7 @@ def board(conn: sqlite3.Connection, home: Path, review_id: str, *, filtro: str =
     return {"righe": [r for r in rows if keep(r)], "conteggi": counts, "passano": eligible,
             "da_preparare": max(0, eligible - sum(1 for r in rows)),
             "pdf_da_collegare": unlinked_documents(conn, home, review_id),
+            "studi_senza_pdf": [{"id": r["id"], "titolo": r["titolo"]} for r in rows if not r["pdf"]],
             "cartella": str(ft_dir(conn, home, review_id)), "criteri": sc._criteria(conn, review_id),
             "claude": {"pacchetti_aperti": len(open_packets(conn, review_id)), "da_proporre": len(to_propose(conn, review_id)),
                        "proposte": conn.execute("""SELECT count(*) FROM ft_proposal p JOIN review_study s ON s.id = p.study_id
