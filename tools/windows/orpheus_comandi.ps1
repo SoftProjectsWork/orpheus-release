@@ -639,9 +639,11 @@ function Invoke-Pacchetti {
             }
             if (-not $sigla) { $sigla = Read-Host '  Sigla della rivista (es. JSAMS)' }
         }
-        $n = Read-Host '  Quanti pacchetti nuovi? (solo Invio = 10)'
+        $n = Read-Host '  Quanti pacchetti nuovi? (solo Invio = 10; T = tutti gli articoli senza scheda)'
     }
     if (-not "$n".Trim()) { $n = '10' }
+    # 2026-11-03 21:56: «aprire il maggior numero di schede possibili» -> T (tutti) apre un pacchetto per ogni articolo
+    if ("$n".Trim().ToUpper() -in @('T', 'TUTTI')) { $n = '100000' }
     $qty = 0; if (-not [int]::TryParse("$n", [ref]$qty) -or $qty -lt 1) { $qty = 10 }
     Write-Log ("  Priorita': {0}{1}, pacchetti nuovi: {2}" -f $mode, $(if ($mode -eq 'rivista') { " ($sigla)" } else { '' }), $qty)
     $argsP = @('pacchetti', '--modo', $mode, '--quanti', "$qty")

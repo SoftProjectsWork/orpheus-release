@@ -106,6 +106,7 @@ REVIEW_FIELDS = [
     ("prisma_doppioni", False, "Diagramma PRISMA: duplicati rimossi"),
     ("prisma_esaminati", False, "Diagramma PRISMA: record esaminati (titolo e abstract)"),
     ("prisma_esclusi_esame", False, "Diagramma PRISMA: record esclusi a titolo e abstract"),
+    ("prisma_non_reperiti", False, "Diagramma PRISMA: articoli cercati ma non reperiti (senza testo completo)"),
     ("prisma_testo_completo", False, "Diagramma PRISMA: articoli letti per intero"),
     ("prisma_esclusi_testo", False, "Diagramma PRISMA: articoli esclusi dopo la lettura (con i motivi in 'note')"),
     ("prisma_inclusi", False, "Diagramma PRISMA: studi inclusi"),
@@ -281,12 +282,14 @@ def sections_of(kind: str) -> tuple[str, ...]:
 def prisma_problems(study: dict) -> list[str]:
     """The numbers of the PRISMA flow diagram must add up (no number in the message: R10)."""
     n = {k: _num(study.get(f"prisma_{k}", "")) for k in ("identificati", "doppioni", "esaminati", "esclusi_esame",
-                                                          "testo_completo", "esclusi_testo", "inclusi", "meta_analisi")}
+                                                          "testo_completo", "esclusi_testo", "inclusi", "meta_analisi",
+                                                          "non_reperiti")}
+    not_retrieved = n["non_reperiti"] or 0          # 2026-11-03 (E10): cercati ma non reperiti, come in PRISMA 2020
     out = []
     if None not in (n["identificati"], n["doppioni"], n["esaminati"]) and n["identificati"] - n["doppioni"] != n["esaminati"]:
         out.append("studio.csv: PRISMA, identificati meno duplicati non dà gli esaminati")
     if None not in (n["esaminati"], n["esclusi_esame"], n["testo_completo"]) and \
-            n["esaminati"] - n["esclusi_esame"] != n["testo_completo"]:
+            n["esaminati"] - n["esclusi_esame"] != n["testo_completo"] + not_retrieved:
         out.append("studio.csv: PRISMA, esaminati meno esclusi non dà gli articoli letti per intero")
     if None not in (n["testo_completo"], n["esclusi_testo"], n["inclusi"]) and \
             n["testo_completo"] - n["esclusi_testo"] != n["inclusi"]:

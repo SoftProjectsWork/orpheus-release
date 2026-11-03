@@ -3425,18 +3425,232 @@ function eurConsensus(list, cur) {
         x.nota ? h("span", {class: "muted"}, ` — ${x.nota}`) : null))) : h("p", null, tag(t("nessuna differenza"), "good"))),
     srcLine(c)];
 }
-function eurMeta(list, cur) {
-  const m = cur.meta;
-  const num = (v) => (v === null || v === undefined) ? "—" : Number(v).toFixed(2).replace(".", ",");
+/* EURYDIKE E8–E9 · Meta-analisi (2026-11-03). 1) Outcome rows of the included studies with the conversion to mean and SD
+   (method beside the number); only rows confirmed or corrected by the user enter an analysis. 2) A new analysis: outcome
+   and time, MD or SMD, model, CI; one experimental and one control row per study (proposed, the user checks), «Calcola»
+   (nothing written), «Registra» (snapshot, report on the PC). 3) Registered analyses, with forest and funnel plots and the
+   files of the final gate (E11). Every number is computed by ORPHEUS (ma-core-1, checked against metafor). */
+const MA_STATE = {ai: ["da confermare", "warn"], confirmed: ["confermata", "good"], edited: ["scritta da te", "acc"]};
+const MA_STATS = [["n", "n"], ["mean", "media"], ["sd", "DS"], ["median", "mediana"], ["q1", "Q1"], ["q3", "Q3"], ["min", "min"], ["max", "max"], ["se", "ES"], ["ci_low", "IC basso"], ["ci_high", "IC alto"]];
+function svgNode(text) {
+  try {
+    const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+    const el = doc.documentElement;
+    return el && el.nodeName === "svg" ? document.importNode(el, true) : h("p", {class: "muted"}, "—");
+  } catch (e) { return h("p", {class: "muted"}, "—"); }
+}
+function maNum(v, d) {
+  if (v === null || v === undefined || v === "") return "—";
+  return Number(v).toFixed(d === undefined ? 2 : d).replace(".", ",");
+}
+function maP(p) { return p === null || p === undefined ? "—" : p < 0.001 ? "<0,001" : maNum(p, 3); }
+function maWritten(st) { return Object.entries(st || {}).map(([k, v]) => `${(MA_STATS.find((x) => x[0] === k) || [k, k])[1]} ${v}`).join(" · "); }
+function maResultLine(r, measure) {
+  if (!r) return "";
+  return `${measure} ${maNum(r.estimate)} [${maNum(r.ci_low)}; ${maNum(r.ci_high)}], p ${maP(r.p)} · I² ${maNum(r.i2, 0)}% · τ² ${maNum(r.tau2, 3)}`
+    + (r.pi_low !== null && r.pi_low !== undefined ? ` · ${t("IP 95%")} [${maNum(r.pi_low)}; ${maNum(r.pi_high)}]` : "");
+}
+async function eurMeta(list, cur) {
+  const rid = encodeURIComponent(cur.revisione.id);
+  const base = `/api/eurydike/revisioni/${rid}/meta`;
+  const guide = h("div"), rowsBox = h("section", {class: "block", "aria-labelledby": "h-marows"});
+  const planBox = h("section", {class: "block", "aria-labelledby": "h-maplan"}), doneBox = h("section", {class: "block", "aria-labelledby": "h-madone"});
+  let data = null;
+  const msg = h("p", {role: "status", class: "muted"});
+  const load = async () => { data = await api(base); drawGuide(); drawRows(); drawPlan(); drawDone(); };
+  const post = async (azione, body) => { const out = await postJson(`${base}/${azione}`, body || {}); clearCache(); return out; };
+  const act = (azione, body, done) => async (e) => {
+    const b = e && e.currentTarget; if (b) b.disabled = true;
+    try { const out = await post(azione, body ? body() : {}); await load(); if (done) done(out); }
+    catch (err) { put(msg, h("span", {class: "error"}, err.message)); }
+    if (b) b.disabled = false;
+  };
+  function drawGuide() {
+    const k = data.conteggi;
+    put(guide, stepGuide("h-maguide", "Come si fa", [
+      {titolo: "Righe di esito", stato: k.righe && !k.da_confermare ? "fatto" : "", conteggio: `${fmtN(k.righe)} ${t("righe")} · ${fmtN(k.da_confermare)} ${t("da confermare")} · ${fmtN(k.usabili)} ${t("pronte")}`,
+        testo: k.righe ? "Le scrive Claude in Estrazione con la frase e la pagina: controllale qui sotto e confermale (o correggile nella scheda)." : "Nessuna riga di esito: in Estrazione metti «righe di esito» nel modulo e prepara i pacchetti per Claude, oppure scrivile tu qui sotto.",
+        azioni: [k.da_confermare ? h("button", {type: "button", class: "btn", onclick: act("conferma_esatte", null, (o) => put(msg, tag(`${t("Confermate")}: ${fmtN(o.confermate)} · ${t("da guardare")}: ${fmtN(o.da_guardare)}`, "good")))}, t("Conferma le righe con frase esatta")) : null]},
+      {titolo: "Nuova analisi", stato: data.analisi.length ? "fatto" : "", conteggio: `${fmtN(data.esiti.length)} ${t("esiti")}`,
+        testo: "Scegli l'esito, la misura e il modello; ORPHEUS propone per ogni studio la riga sperimentale e quella di controllo: controllale, poi «Calcola»."},
+      {titolo: "Registra", stato: data.analisi.length ? "fatto" : "", conteggio: `${fmtN(data.analisi.length)} ${t("analisi registrate")}`,
+        testo: "«Registra» salva l'analisi con i suoi dati di partenza e scrive il rapporto con forest e funnel plot nella cartella della revisione."}], msg));
+  }
+  function rowForm(studi) {
+    const f = {};
+    const inp = (k, attrs) => (f[k] = h("input", {type: "text", ...(attrs || {})}));
+    const sel = (f.studio = h("select", {"aria-label": t("Studio")}, studi.map((s) => h("option", {value: s.id}, s.studio))));
+    const out = h("p", {role: "status", class: "muted"});
+    return h("details", {class: "ma-add"}, h("summary", null, t("Scrivi o correggi una riga a mano")),
+      h("p", {class: "muted"}, t("Scrivi i numeri come nell'articolo: ORPHEUS ricava media e DS e scrive il metodo accanto. Con la stessa terna esito, gruppo e tempo la riga sostituisce quella di prima.")),
+      h("div", {class: "form-grid"}, field(t("Studio"), sel), field(t("Esito"), inp("esito", {lang: "en"})), field(t("Gruppo"), inp("gruppo", {lang: "en"})),
+        field(t("Tempo"), inp("tempo", {lang: "en"})), field(t("Unità"), inp("unita", {lang: "en"})),
+        ...MA_STATS.map(([k, l]) => field(t(l), inp(k, {inputmode: "decimal", class: "num-in"}))),
+        field(t("Frase (facoltativa)"), inp("citazione", {lang: "en"})), field(t("Pagina"), inp("pagina", {inputmode: "numeric", class: "num-in"}))),
+      h("div", {class: "action-row"}, h("button", {type: "button", class: "btn", onclick: act("riga", () => {
+        const st = {};
+        for (const [k] of MA_STATS) if (f[k].value.trim()) st[k] = f[k].value.trim();
+        return {studio: f.studio.value, esito: f.esito.value, gruppo: f.gruppo.value, tempo: f.tempo.value, unita: f.unita.value,
+          statistiche: st, citazione: f.citazione.value, pagina: f.pagina.value};
+      }, () => put(msg, tag(t("Riga salvata"), "good")))}, t("Salva la riga")), out));
+  }
+  function drawRows() {
+    const studi = data.studi;
+    put(rowsBox, h("div", {class: "block-head"}, h("h2", {id: "h-marows"}, t("Righe di esito e conversioni")),
+        h("span", {class: "muted"}, `${fmtN(data.conteggi.studi)} ${t("studi inclusi")}`)),
+      data.conteggi.senza_articolo ? h("p", null, tag(`${fmtN(data.conteggi.senza_articolo)} ${t("studi senza articolo in ORPHEUS")}`, "warn"), " ",
+        h("a", {href: `#/eurydike/estrazione?r=${rid}`}, t("Estrazione → «Collega gli articoli»"))) : null,
+      studi.length ? h("div", {class: "table-wrap"}, h("table", null,
+        h("thead", null, h("tr", null, ["Studio", "Esito · gruppo · tempo", "Come nell'articolo", "Media ± DS (metodo)", "Stato", ""].map((x) => h("th", {scope: "col"}, t(x))))),
+        h("tbody", null, studi.flatMap((s) => s.righe.length ? s.righe.map((r, i) => h("tr", null,
+          i === 0 ? h("td", {rowspan: String(s.righe.length)}, h("span", {lang: "en"}, s.studio), s.anno ? h("span", {class: "muted"}, ` · ${s.anno}`) : null) : null,
+          h("td", {lang: "en"}, h("b", null, r.esito), ` · ${r.gruppo} · ${r.tempo}`, r.unita ? h("span", {class: "muted"}, ` (${r.unita})`) : null),
+          h("td", null, maWritten(r.statistiche), r.frase ? h("div", {class: "muted", lang: "en", title: r.frase}, `p. ${r.pagina || "—"}${r.tabella ? " · " + r.tabella : ""} · ${t(r.verifica_frase === "exact" ? "frase esatta" : r.verifica_frase === "fuzzy" ? "frase simile" : r.verifica_frase === "not_found" ? "frase non trovata" : "senza frase")}`) : null),
+          h("td", null, r.media !== null && r.ds !== null ? `${maNum(r.media)} ± ${maNum(r.ds)}` : "—", r.metodo && r.metodo !== "reported" ? h("div", {class: "muted", lang: "en"}, r.metodo) : null,
+            r.problemi.length ? h("div", null, tag(t(r.problemi[0]), "crit")) : null),
+          h("td", null, tag(t(MA_STATE[r.stato][0]), MA_STATE[r.stato][1]), r.usabile ? null : h("div", {class: "muted"}, t(r.perche_no))),
+          h("td", null, r.stato === "ai" ? h("button", {type: "button", class: "btn small", onclick: act("conferma_riga", () => ({riga: r.id}))}, t("Conferma")) : null, " ",
+            s.articolo ? h("a", {class: "linklike", href: `#/eurydike/estrazione?a=${encodeURIComponent(s.articolo)}`}, t("Correggi")) : null)))
+          : [h("tr", null, h("td", {lang: "en"}, s.studio), h("td", {colspan: "5", class: "muted"}, t(s.articolo ? "nessuna riga di esito" : "senza articolo in ORPHEUS")))]))))
+        : h("p", {class: "empty"}, t("Nessuno studio incluso al full text.")),
+      studi.length ? rowForm(studi) : null);
+  }
+  let plan = null, lastOk = false;
+  function drawPlan() {
+    const out = h("div", {"aria-live": "polite"});
+    const pairsBox = h("div");
+    const esito = h("select", {"aria-label": t("Esito e tempo")}, h("option", {value: ""}, t("— scegli l'esito —")),
+      data.esiti.map((e, i) => h("option", {value: String(i)}, `${e.esito}${e.tempo ? " · " + e.tempo : ""} (${e.studi_pronti}/${e.studi} ${t("studi pronti")})`)));
+    const nome = h("input", {type: "text", lang: "en", placeholder: "e.g. Sprint time, post-intervention"});
+    const misura = h("select", null, [["SMD", "SMD (Hedges g)"], ["MD", "MD (stessa unità)"]].map(([v, l]) => h("option", {value: v}, t(l))));
+    const modello = h("select", null, [["RE-REML", "Effetti casuali (REML)"], ["RE-DL", "Effetti casuali (DerSimonian-Laird)"], ["FE", "Effetto fisso"]].map(([v, l]) => h("option", {value: v}, t(l))));
+    const ic = h("select", null, [["wald", "Wald (z)"], ["hksj", "Hartung-Knapp (t)"]].map(([v, l]) => h("option", {value: v}, t(l))));
+    const sx = h("input", {type: "text", lang: "en", value: "Favours control"}), dx = h("input", {type: "text", lang: "en", value: "Favours intervention"});
+    const regBtn = h("button", {type: "button", class: "btn primary", disabled: ""}, t("Registra l'analisi"));
+    const current = () => {
+      const e = data.esiti[Number(esito.value)];
+      return {nome: nome.value.trim() || (e ? e.esito : ""), esito: e ? e.esito : "", tempo: e ? e.tempo : "", misura: misura.value, modello: modello.value,
+        ic: ic.value, sinistra: sx.value, destra: dx.value, coppie: plan ? plan.studi.map((s) => s.scelta) : []};
+    };
+    const invalidate = () => { lastOk = false; regBtn.disabled = true; };
+    for (const el of [nome, misura, modello, ic, sx, dx]) el.addEventListener("change", invalidate);
+    esito.addEventListener("change", async () => {
+      invalidate(); put(out); put(pairsBox);
+      const e = data.esiti[Number(esito.value)];
+      if (!e) return;
+      plan = await api(`${base}?esito=${encodeURIComponent(e.esito)}&tempo=${encodeURIComponent(e.tempo || "")}`);
+      for (const s of plan.studi) s.scelta = {studio: s.studio, riga_e: s.riga_e || "", riga_c: s.riga_c || "", inverti: false};
+      drawPairs();
+    });
+    function drawPairs() {
+      const opts = (s, v) => [h("option", {value: ""}, t("— fuori dall'analisi —")), ...s.tutte.map((r) => h("option", {value: r.id, selected: r.id === v ? true : null, disabled: r.usabile ? null : ""},
+        `${r.esito} · ${r.gruppo} · ${r.tempo}${r.usabile ? "" : " (" + t(r.perche_no) + ")"}`))];
+      put(pairsBox, h("div", {class: "table-wrap"}, h("table", null,
+        h("thead", null, h("tr", null, ["Studio", "Gruppo sperimentale", "Gruppo di controllo", "Inverti il segno"].map((x) => h("th", {scope: "col"}, t(x))))),
+        h("tbody", null, plan.studi.map((s) => {
+          const e = h("select", {"aria-label": `${t("Gruppo sperimentale")}: ${s.etichetta}`, onchange: () => { s.scelta.riga_e = e.value; invalidate(); }}, opts(s, s.scelta.riga_e));
+          const c = h("select", {"aria-label": `${t("Gruppo di controllo")}: ${s.etichetta}`, onchange: () => { s.scelta.riga_c = c.value; invalidate(); }}, opts(s, s.scelta.riga_c));
+          const inv = h("input", {type: "checkbox", "aria-label": `${t("Inverti il segno")}: ${s.etichetta}`, onchange: () => { s.scelta.inverti = inv.checked; invalidate(); }});
+          return h("tr", null, h("td", {lang: "en"}, s.etichetta), h("td", null, e), h("td", null, c), h("td", null, inv));
+        })))),
+        h("p", {class: "src"}, t("Inverti il segno solo per le scale in direzione opposta (es. più alto = peggio): l'inversione è scritta nell'analisi registrata.")));
+    }
+    const calc = h("button", {type: "button", class: "btn", onclick: async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; put(out, h("p", {class: "muted"}, t("Calcolo…")));
+      try {
+        const r = await post("calcola", {piano: current()});
+        if (r.problemi.length) { put(out, h("ul", {class: "notes"}, r.problemi.map((x) => h("li", null, tag(t("da sistemare"), "crit"), " ", x)))); invalidate(); }
+        else {
+          lastOk = true; regBtn.disabled = false;
+          put(out, h("p", null, h("b", null, maResultLine(r.risultato, r.piano.misura)), ` · k = ${fmtN(r.risultato.k)}`),
+            r.risultato.egger ? h("p", {class: "muted"}, `Egger: t = ${maNum(r.risultato.egger.t)}, p ${maP(r.risultato.egger.p)}`) : h("p", {class: "muted"}, t("Test di Egger non eseguito: meno di 10 studi.")),
+            h("figure", {class: "ma-fig"}, svgNode(r.forest)), h("figure", {class: "ma-fig"}, svgNode(r.funnel)));
+        }
+      } catch (err) { put(out, h("p", {class: "error"}, err.message)); }
+      b.disabled = false;
+    }}, t("Calcola"));
+    regBtn.onclick = async () => {
+      if (!lastOk) return;
+      regBtn.disabled = true;
+      try { const o = await post("registra", {piano: current()}); await load(); put(msg, tag(`${t("Analisi registrata")} (k = ${fmtN(o.k)})${o.rapporto ? " · " + t("rapporto") + ": " + o.rapporto : ""}`, "good")); }
+      catch (err) { put(out, h("p", {class: "error"}, err.message)); regBtn.disabled = false; }
+    };
+    put(planBox, h("h2", {id: "h-maplan"}, t("Nuova analisi")),
+      data.esiti.length ? [h("div", {class: "form-grid"}, field(t("Esito e tempo"), esito), field(t("Nome dell'analisi (in inglese)"), nome),
+          field(t("Misura"), misura), field(t("Modello"), modello), field(t("Intervallo di confidenza"), ic),
+          field(t("Etichetta a sinistra"), sx), field(t("Etichetta a destra"), dx)),
+        pairsBox, h("div", {class: "action-row"}, calc, regBtn), out]
+        : h("p", {class: "empty"}, t("Nessuna riga di esito: prima l'estrazione.")));
+  }
+  function drawDone() {
+    const detailBox = h("div", {"aria-live": "polite"});
+    const open = async (a) => {
+      put(detailBox, h("p", {class: "muted"}, t("Carico…")));
+      try {
+        const d = await api(`${base}/analisi/${encodeURIComponent(a.id)}`);
+        put(detailBox, h("h3", {lang: "en"}, d.piano.nome), h("p", null, h("b", null, maResultLine(d.risultato, d.piano.misura))),
+          h("figure", {class: "ma-fig"}, svgNode(d.forest)), h("figure", {class: "ma-fig"}, svgNode(d.funnel)),
+          h("div", {class: "table-wrap"}, h("table", null, h("thead", null, h("tr", null, ["Studio", "Sperimentale", "Controllo", "Effetto", "Peso"].map((x) => h("th", {scope: "col"}, t(x))))),
+            h("tbody", null, d.risultato.studies.map((st, i) => { const x = d.input[i]; return h("tr", null, h("td", {lang: "en"}, st.label),
+              h("td", null, `${maNum(x.media_e)} ± ${maNum(x.ds_e)} (n ${x.n_e})`, h("div", {class: "muted", lang: "en"}, x.metodo_e)),
+              h("td", null, `${maNum(x.media_c)} ± ${maNum(x.ds_c)} (n ${x.n_c})`, h("div", {class: "muted", lang: "en"}, x.metodo_c)),
+              h("td", null, `${maNum(st.yi)} [${maNum(st.ci_low)}; ${maNum(st.ci_high)}]`), h("td", {class: "n"}, `${maNum(st.weight, 1)}%`)); })))),
+          h("p", {lang: "en", class: "muted"}, d.metodi), h("p", {class: "src"}, `${d.versione} · SHA-256 ${d.sha256.slice(0, 16)}…`));
+      } catch (err) { put(detailBox, h("p", {class: "error"}, err.message)); }
+    };
+    const gate = Object.fromEntries((data.gate || []).map((g) => [g.analisi, g]));
+    put(doneBox, h("h2", {id: "h-madone"}, t("Analisi registrate")),
+      data.analisi.length ? [h("div", {class: "table-wrap"}, h("table", null,
+        h("thead", null, h("tr", null, ["Analisi", "Misura e modello", "k", "Risultato", "Registrata", ""].map((x) => h("th", {scope: "col"}, t(x))))),
+        h("tbody", null, data.analisi.map((a) => h("tr", null,
+          h("td", {lang: "en"}, h("b", null, a.nome), h("div", {class: "muted"}, `${a.esito}${a.tempo ? " · " + a.tempo : ""}`), a.attuale ? null : h("div", null, tag(t("righe cambiate: registra di nuovo"), "warn"))),
+          h("td", null, `${a.misura} · ${a.modello} · ${a.ic.toUpperCase()}`), h("td", {class: "n"}, fmtN(a.k)),
+          h("td", null, maResultLine(a.risultato, a.misura)), h("td", null, fmtDate(a.creata, false)),
+          h("td", null, h("button", {type: "button", class: "btn small", onclick: () => open(a)}, t("Apri")), " ",
+            h("button", {type: "button", class: "btn small", onclick: act("rapporto", () => ({analisi: a.id}), (o) => put(msg, tag(`${t("Rapporto")}: ${o.file}`, "good")))}, t("Rapporto sul PC")), " ",
+            h("details", {class: "ma-gate"}, h("summary", null, t("Gate finale (E11)")),
+              h("p", {class: "muted"}, t("Per rifare una meta-analisi pubblicata: prepara il file, scrivi i valori dell'articolo nella colonna «pubblicato», poi «Confronta».")),
+              h("div", {class: "action-row"},
+                h("button", {type: "button", class: "btn small", disabled: gate[a.id] && gate[a.id].file ? "" : null, onclick: act("gate_file", () => ({analisi: a.id}), (o) => put(msg, tag(`${t("File")}: ${o.file}`, "good")))}, t("Prepara il file")),
+                h("button", {type: "button", class: "btn small", disabled: gate[a.id] && gate[a.id].file ? null : "", onclick: act("gate_confronta", () => ({analisi: a.id}), (o) => put(msg, tag(`${o.superato ? t("Superato") : t("Non ancora superato")}: ${fmtN(o.diversi)} ${t("diversi")}, ${fmtN(o.spiegati)} ${t("spiegati")}, ${fmtN(o.mancanti.length)} ${t("mancanti")} · ${o.rapporto}`, o.superato ? "good" : "warn")))}, t("Confronta")))))))))),
+        detailBox]
+        : h("p", {class: "empty"}, t("Nessuna analisi registrata.")));
+  }
+  await load();
   return [eurBar(list, cur, "meta"), ...head(t("Meta-analisi"), t("MD o SMD con effetti fissi o casuali (DL, REML), IC di Wald o HKSJ: ogni analisi registrata con i suoi dati di partenza, ricalcolabile.")),
-    m.analisi.length ? h("div", {class: "table-wrap"}, h("table", null,
-      h("thead", null, h("tr", null, ["Esito", "Tempo", "Misura", "Modello", "IC", "k", "Stima [IC 95%]", "I²", "Registrata"].map((x) => h("th", {scope: "col"}, t(x))))),
-      h("tbody", null, m.analisi.map((a) => h("tr", null, h("td", {lang: "en"}, a.esito), h("td", null, a.tempo || "—"), h("td", null, a.misura), h("td", null, a.modello),
-        h("td", null, a.ic.toUpperCase()), h("td", {class: "n"}, fmtN(a.k)),
-        h("td", null, a.risultato.estimate !== undefined ? `${num(a.risultato.estimate)} [${num(a.risultato.ci_low)}; ${num(a.risultato.ci_high)}]` : "—"),
-        h("td", null, a.risultato.i2 !== undefined ? `${num(a.risultato.i2)}%` : "—"), h("td", null, fmtDate(a.creata, false)))))))
-      : h("p", {class: "empty"}, t("Nessuna analisi registrata: le analisi arrivano con la fase 7 (E9, T-051j), dalle righe di esito confermate.")),
-    srcLine(m)];
+    guide, rowsBox, planBox, doneBox, srcLine(data)];
+}
+function eurArticleBlock(cur) {
+  /* E10: the project of nuovo_articolo.cmd filled from the review, and the draft of Methods and Results in Word */
+  const rid = encodeURIComponent(cur.revisione.id);
+  const box = h("section", {class: "block", "aria-labelledby": "h-maart"}, h("h2", {id: "h-maart"}, t("Articolo della revisione")), h("p", {class: "muted"}, t("Carico…")));
+  (async () => {
+    let d;
+    try { d = (await api(`/api/eurydike/revisioni/${rid}/meta`)).articolo; } catch (e) { put(box, h("h2", {id: "h-maart"}, t("Articolo della revisione")), h("p", {class: "error"}, e.message)); return; }
+    const nome = h("input", {type: "text", value: (d.progetti[0] && d.progetti[0].nome) || d.suggerito, "aria-label": t("Nome del progetto")});
+    const rivista = h("input", {type: "text", placeholder: "JSAMS", "aria-label": t("Rivista (sigla)")});
+    const msg = h("div", {role: "status"});
+    const run = (azione) => async (e) => {
+      const b = e.currentTarget; b.disabled = true;
+      try {
+        const o = await postJson(`/api/eurydike/revisioni/${rid}/meta/${azione}`, {nome: nome.value.trim(), rivista: rivista.value.trim() || null});
+        put(msg, azione === "articolo"
+          ? h("div", null, tag(`${t("Pronto")}: ${o.cartella}`, "good"), h("p", {class: "muted"}, `${t("Studi")}: ${fmtN(o.studi)} · ${t("risultati")}: ${fmtN(o.risultati)} · ${t("campi scritti")}: ${fmtN(o.campi_scritti.length)} · ${t("tuoi lasciati")}: ${fmtN(o.campi_tuoi_lasciati.length)}`),
+              o.problemi.length ? h("ul", {class: "notes"}, o.problemi.map((x) => h("li", null, x))) : null)
+          : tag(`${t("Bozza")}: ${o.file} (${fmtN(o.paragrafi)} ${t("paragrafi")}, 0 ${t("numeri senza origine")})`, "good"));
+      } catch (err) { put(msg, h("p", {class: "error"}, err.message)); }
+      b.disabled = false;
+    };
+    put(box, h("h2", {id: "h-maart"}, t("Articolo della revisione")),
+      h("p", null, t("Riempie il progetto di nuovo_articolo.cmd: numeri PRISMA calcolati, studi inclusi, risultati delle analisi registrate. I campi che hai scritto tu non si toccano.")),
+      h("p", {class: "muted"}, `${t("Studi inclusi")}: ${fmtN(d.studi_inclusi)} · ${t("analisi attuali")}: ${fmtN(d.analisi_attuali)}`),
+      h("div", {class: "form-grid"}, field(t("Nome del progetto"), nome), field(t("Rivista (sigla, facoltativa)"), rivista)),
+      h("div", {class: "action-row"}, h("button", {type: "button", class: "btn primary", onclick: run("articolo")}, t("Prepara l'articolo")),
+        h("button", {type: "button", class: "btn", onclick: run("bozza")}, t("Bozza di Metodi e Risultati in Word"))),
+      d.progetti.length ? h("p", {class: "muted"}, `${t("Progetti di revisione")}: `, d.progetti.map((p) => `${p.nome}${p.bozza ? " ✓" : ""}`).join(", ")) : null,
+      msg, h("p", {class: "src"}, t("La bozza la scrive ORPHEUS dai fatti della revisione (nessun modello): ogni numero viene dai file dell'articolo, altrimenti la bozza non si crea. Poi le sezioni le scrive Claude come per ogni articolo.")));
+  })();
+  return box;
 }
 function csvOf(rows) {
   const esc = (v) => { const x = v === null || v === undefined ? "" : String(v); return /[";\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
@@ -3481,7 +3695,7 @@ function eurExport(list, cur) {
       btn("Scarica gli studi (full text)", async () => download(`${slug}_studi_${stamp}.csv`, csvOf([["studio", "articolo", "doi", "pagine_pdf", "decisione", "criterio", "nota", "deciso_da", "deciso_il", "proposta_claude"],
         ...cur.fulltext.studi.map((x) => [x.studio, x.articolo, x.doi, x.pagine, x.decisione, x.criterio, x.nota, x.deciso_da, x.deciso_il, x.proposta ? x.proposta.decisione : ""])]))),
       btn("Scarica le decisioni dello screening", records)),
-    msg];
+    msg, eurArticleBlock(cur)];
 }
 
 /* ------------------------------------------------------------------ EURYDIKE · nuova revisione e importazione (T-051d) */

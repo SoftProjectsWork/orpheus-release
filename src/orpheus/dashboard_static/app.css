@@ -816,3 +816,10 @@ tr.clickable{cursor:pointer}
 .pstep-path{overflow-wrap:anywhere;font-size:12px;display:block}
 .pstep .action-row{margin-top:auto;flex-wrap:wrap;gap:6px}
 .pstep .ft-unlinked select{max-width:100%}
+/* EURYDIKE E9 · Meta-analisi: forest and funnel plots (SVG with currentColor), hand-written rows, final gate */
+.ma-fig{margin:12px 0;overflow-x:auto;color:var(--ink)}
+.ma-fig svg{display:block;width:100%;height:auto}
+.ma-add,.ma-gate{margin-top:10px}
+.ma-add summary,.ma-gate summary{cursor:pointer;font-weight:600}
+.ma-add .num-in{width:90px}
+.ma-gate{display:inline-block;vertical-align:top}

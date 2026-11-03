@@ -1352,6 +1352,56 @@ def eurydike_rb_write(s: Settings, conn, rid: str, action: str, body: dict) -> d
     return _protected_write(s, conn, fn)
 
 
+def eurydike_ma_board(s: Settings, conn, rid: str, q) -> dict:
+    """E8–E11 (2026-11-03): outcome rows with conversions, registered analyses, the article and the final gate."""
+    from .eurydike import bozza, gate, meta
+    if q.get("esito"):
+        return meta.suggest(conn, rid, q.get("esito"), q.get("tempo") or None)
+    return {**meta.board(conn, rid), "articolo": bozza.board(conn, s.home, rid), "gate": gate.status(conn, s.home, rid),
+            **_src("card_outcome_row, ma_analysis, ma_input (eurydike-ma-v1, ma-core-1)", utc_now())}
+
+
+def eurydike_ma_detail(s: Settings, conn, rid: str, mid: str) -> dict:
+    from .eurydike import meta
+    return {**meta.detail(conn, rid, mid), **_src("ma_analysis, ma_input", utc_now())}
+
+
+def eurydike_ma_write(s: Settings, conn, rid: str, action: str, body: dict) -> dict:
+    from .eurydike import bozza, gate, meta
+    txt = lambda k: (str(body[k]).strip() or None) if body.get(k) not in (None, "") else None  # noqa: E731
+    if action == "calcola":                                  # nothing written: the analysis as it would be registered
+        return meta.compute(conn, rid, body.get("piano") or {})
+    if action == "conferma_riga":
+        fn = lambda: meta.confirm_row(conn, rid, str(body.get("riga") or ""))       # noqa: E731
+    elif action == "conferma_esatte":
+        fn = lambda: meta.confirm_exact_rows(conn, rid, study_id=txt("studio"))     # noqa: E731
+    elif action == "riga":
+        page = txt("pagina")
+        try:
+            page = int(page) if page is not None else None
+        except ValueError as exc:
+            raise ValueError("la pagina è un numero") from exc
+        fn = lambda: meta.edit_row(conn, rid, str(body.get("studio") or ""), outcome=txt("esito") or "",  # noqa: E731
+                                   group=txt("gruppo") or "", timepoint=txt("tempo") or "", unit=txt("unita"),
+                                   stats=body.get("statistiche") or {}, quote=txt("citazione"), page=page,
+                                   table=txt("tabella"), note=txt("nota"))
+    elif action == "registra":
+        fn = lambda: meta.register(conn, s.home, rid, body.get("piano") or {})      # noqa: E731
+    elif action == "rapporto":
+        return {"file": str(meta.write_report(conn, s.home, rid, str(body.get("analisi") or "")))}
+    elif action == "articolo":
+        return bozza.to_new_article(conn, s.home, rid, str(body.get("nome") or ""), txt("rivista"))
+    elif action == "bozza":
+        return bozza.draft(conn, s.home, rid, str(body.get("nome") or ""))
+    elif action == "gate_file":
+        return gate.template(conn, s.home, rid, str(body.get("analisi") or ""))
+    elif action == "gate_confronta":
+        return gate.compare(conn, s.home, rid, str(body.get("analisi") or ""))
+    else:
+        raise ValueError("azione sconosciuta")
+    return _protected_write(s, conn, fn)
+
+
 def eurydike_rules_read(s: Settings, conn, rid: str, q) -> dict:
     """Bulk rules of the screening (0.70.0): the rules with their counts, the publication types, the preview."""
     from .eurydike import rules as ru
@@ -2059,6 +2109,16 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         rid = request.path_params["rid"]
         return await simple_post(request, lambda b: eurydike_choose_search_folder(s, rid, b))
 
+    async def ma_write_endpoint(request: Request):
+        rid, action = request.path_params["rid"], request.path_params["azione"]
+        return await eurydike_post(request, lambda c, b: eurydike_ma_write(s, c, rid, action, b))
+
+    def ma_board_endpoint(request, conn):
+        return eurydike_ma_board(s, conn, request.path_params["rid"], request.query_params)
+
+    def ma_detail_endpoint(request, conn):
+        return eurydike_ma_detail(s, conn, request.path_params["rid"], request.path_params["mid"])
+
     async def rb_write_endpoint(request: Request):
         rid, action = request.path_params["rid"], request.path_params["azione"]
         return await eurydike_post(request, lambda c, b: eurydike_rb_write(s, c, rid, action, b))
@@ -2321,6 +2381,9 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         Route("/api/eurydike/revisioni/{rid}/fulltext", with_db(ft_board_endpoint)),
         Route("/api/eurydike/revisioni/{rid}/fulltext/{azione}", ft_write_endpoint, methods=["POST"]),
         Route("/api/eurydike/documenti/{doc}/pdf", document_pdf),
+        Route("/api/eurydike/revisioni/{rid}/meta", with_db(ma_board_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/meta/analisi/{mid}", with_db(ma_detail_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/meta/{azione}", ma_write_endpoint, methods=["POST"]),
         Route("/api/eurydike/revisioni/{rid}/bias", with_db(rb_board_endpoint)),
         Route("/api/eurydike/revisioni/{rid}/bias/studio/{sid}", with_db(rb_study_endpoint)),
         Route("/api/eurydike/revisioni/{rid}/bias/{azione}", rb_write_endpoint, methods=["POST"]),
