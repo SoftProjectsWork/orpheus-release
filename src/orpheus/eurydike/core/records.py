@@ -47,6 +47,63 @@ def rec_key(r: dict) -> str:
     return "t:" + norm_title(r.get("title"))[:140] + "|" + str(r.get("year") or "")
 
 
+def match_title(text: str | None) -> str:
+    """Title used to match records across databases (EURYDIKE, decision of the user of 2026-11-03): `norm_title`
+    without the final full stop. PubMed ends titles with "." and puts translated titles in [ ] ("[Title]."), Scopus
+    does not: with `norm_title` alone the same article had two keys (3 duplicates missed in a real import)."""
+    return norm_title(text).rstrip(" .")
+
+
+def match_keys(r: dict) -> list[tuple[str, str]]:
+    """Keys of a record for duplicate matching, as (reason, key), strongest first: DOI, PMID, title and year.
+    The title key exists for every record with a title, also when it has a DOI."""
+    keys = []
+    doi = clean_doi(r.get("doi"))
+    if doi:
+        keys.append(("doi", "doi:" + doi))
+    pmid = re.sub(r"\D", "", str(r.get("pmid") or ""))
+    if pmid:
+        keys.append(("pmid", "pmid:" + pmid))
+    title = match_title(r.get("title"))
+    if title:
+        keys.append(("titolo", "t:" + title[:140] + "|" + str(r.get("year") or "")))
+    return keys
+
+
+class DedupIndex:
+    """Duplicates by DOI, PMID or title and year (EURYDIKE, 2026-11-03). A record is a duplicate of the first record
+    that shares one of its keys. The same DOI is always a duplicate; a match by PMID or title is not when the two
+    have different DOIs or different PMIDs (different articles with the same title: an erratum, a reprint, a chapter
+    with a common title)."""
+
+    def __init__(self) -> None:
+        self._first: dict[str, str] = {}
+        self._ids: dict[str, tuple[str, str]] = {}
+
+    @staticmethod
+    def _ids_of(r: dict) -> tuple[str, str]:
+        return clean_doi(r.get("doi")), re.sub(r"\D", "", str(r.get("pmid") or ""))
+
+    def find(self, r: dict) -> tuple[str | None, str | None]:
+        """(id of the record r duplicates, reason) or (None, None)."""
+        doi, pmid = self._ids_of(r)
+        for reason, key in match_keys(r):
+            rid = self._first.get(key)
+            if rid is None:
+                continue
+            odoi, opmid = self._ids[rid]
+            if reason != "doi" and ((doi and odoi and doi != odoi) or (pmid and opmid and pmid != opmid)):
+                continue
+            return rid, reason
+        return None, None
+
+    def add(self, rid: str, r: dict) -> None:
+        """Register a record kept (not a duplicate); the first record with a key keeps it."""
+        self._ids[rid] = self._ids_of(r)
+        for _, key in match_keys(r):
+            self._first.setdefault(key, rid)
+
+
 def dedupe(records: Iterable[dict], seen: set[str] | None = None) -> tuple[list[dict], int]:
     """Records not already present (by `rec_key`) among `seen` (keys of every record already imported, in any
     batch) nor earlier in the same file. Returns (kept, number of duplicates); `seen` is updated in place."""
@@ -181,8 +238,37 @@ def _map(r: dict[str, list[str]]) -> dict:
                 doi = m.group(0) if m else v.split("[")[0]
                 break
     pmid = (_first(r, ("PMID", "PM")) or [""])[0]
-    return _limit({"title": title, "abstract": abstract, "authors": authors, "year": year, "journal": journal,
-                   "doi": clean_doi(doi), "pmid": pmid.strip()})
+    out = _limit({"title": title, "abstract": abstract, "authors": authors, "year": year, "journal": journal,
+                  "doi": clean_doi(doi), "pmid": pmid.strip()})
+    out["pub_types"] = pub_types(r)
+    return out
+
+
+RIS_TYPES = {"CONF": "Conference Paper", "CPAPER": "Conference Paper", "BOOK": "Book", "CHAP": "Book Chapter",
+             "THES": "Thesis", "RPRT": "Report", "EDBOOK": "Book", "ABST": "Abstract", "NEWS": "News"}
+
+
+def split_types(values) -> list[str]:
+    """Publication types without repeats (order kept); "Review; Editorial" counts as two."""
+    out: list[str] = []
+    for v in values or []:
+        for t in re.split(r"[;|]", v or ""):
+            t = re.sub(r"\s+", " ", t).strip()[:80]
+            if t and t.lower() not in [x.lower() for x in out]:
+                out.append(t)
+    return out[:12]
+
+
+def pub_types(r: dict[str, list[str]]) -> list[str]:
+    """Publication types of a tagged record: PubMed PT, RIS M3 (Scopus document type) or the RIS TY code when it is
+    not a journal article, Web of Science DT."""
+    if r.get("PT") and r.get("PMID"):
+        return split_types(r["PT"])
+    vals = list(r.get("M3", [])) + list(r.get("DT", []))
+    if not vals:
+        ty = (r.get("TY") or [""])[0].strip().upper()
+        vals = [RIS_TYPES[ty]] if ty in RIS_TYPES else []
+    return split_types(vals)
 
 
 def _limit(rec: dict) -> dict:
@@ -202,6 +288,8 @@ HEADERS = {
     "journal": ("journal", "source title", "source", "publication title", "journal/book", "so", "rivista", "fonte"),
     "doi": ("doi", "di"),
     "pmid": ("pmid", "pubmed id", "pm"),
+    "pub_types": ("document type", "publication type", "publication types", "dt", "pt", "tipo di documento",
+                  "tipo di pubblicazione", "tipo"),
 }
 
 
@@ -233,7 +321,10 @@ def parse_table(text: str, fmt: str = "csv") -> list[dict]:
         m = re.search(r"\d{4}", rec.get("year") or "")
         rec["year"] = m.group(0) if m else ""
         rec["doi"] = clean_doi(rec.get("doi"))
-        out.append(_limit(rec))
+        types = split_types([rec.get("pub_types") or ""])
+        rec = _limit(rec)
+        rec["pub_types"] = types
+        out.append(rec)
     return out
 
 

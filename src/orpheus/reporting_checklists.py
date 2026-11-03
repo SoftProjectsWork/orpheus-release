@@ -209,7 +209,7 @@ PRISMA_P = (
        r"PubMed|MEDLINE|Embase|Scopus|Web of Science|SPORTDiscus|Cochrane|CINAHL|PsycINFO|Google Scholar"),
     _i("strategia", "Stringa di ricerca di almeno una banca dati", "methods all",
        r"search strings?|Boolean|search terms|search strategy|\bAND\b.*\bOR\b|\bOR\b.*\bAND\b"),
-    _i("gestione", "Gestione dei record (programma, doppioni)", "methods", r"Rayyan|Covidence|EndNote|Zotero|Mendeley|duplicat|reference manager"),
+    _i("gestione", "Gestione dei record (programma, duplicati)", "methods", r"Rayyan|Covidence|EndNote|Zotero|Mendeley|duplicat|reference manager"),
     _i("selezione", "Selezione degli studi (due revisori indipendenti, disaccordi)", "methods",
        r"independent(?:ly)?|two (?:authors|reviewers|investigators)|screen|disagreement|consensus"),
     _i("estrazione", "Raccolta dei dati (modulo, chi, come)", "methods", r"extract|data collection form"),

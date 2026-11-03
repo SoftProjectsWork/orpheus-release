@@ -37,7 +37,7 @@ GROUP = "Revisione sistematica"
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 BOXES = {   # name in the details (Italian, shown to the user)
-    "identified": "identificati", "other": "da altre fonti", "duplicates": "doppioni", "removed": "rimossi prima",
+    "identified": "identificati", "other": "da altre fonti", "duplicates": "duplicati", "removed": "rimossi prima",
     "screened": "esaminati", "excluded": "esclusi (titolo/abstract)", "sought": "cercati per intero",
     "not_retrieved": "non recuperati", "assessed": "letti per intero", "ft_excluded": "esclusi al full text",
     "included": "inclusi", "ma": "nella meta-analisi", "added": "studi aggiunti (altre fonti)",

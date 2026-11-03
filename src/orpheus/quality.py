@@ -222,7 +222,7 @@ def build(conn: sqlite3.Connection, home: Path, journals: list[dict]) -> dict:
         if len(group) > 1:
             for r in group:
                 r["stesso_doi_di"] = "; ".join(o["file"] for o in group if o is not r)
-                r["_checks"].append("stesso DOI di un altro file: probabile doppione")
+                r["_checks"].append("stesso DOI di un altro file: probabile duplicato")
     # Same title + different DOI: typically a conference abstract and the full article. Groups made only of
     # abstract pages are skipped: their PDF title is often the title of a NEIGHBOURING abstract.
     def related(group):

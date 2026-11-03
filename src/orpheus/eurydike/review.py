@@ -158,6 +158,82 @@ def add_criterion(conn: sqlite3.Connection, review_id: str, *, kind: str, text: 
     return cid
 
 
+STATUSES = ("protocol", "screening", "fulltext", "extraction", "analysis", "closed")
+EDITABLE = {"title": "titolo", "question": "domanda", "kind": "tipo", "pico": "pico", "registration": "registrazione",
+            "search_strategy": "strategia", "screen_reviewers": "revisori_screening", "blind_reviewers": "cieco",
+            "blind_ai": "cieco_ai", "rob_tool_default": "rob", "qual_tool_default": "qualita", "status": "fase"}
+
+
+def update_review(conn: sqlite3.Connection, review_id: str, changes: Mapping, *, actor: str = "user") -> dict:
+    """Change the parameters of a review (request of the user of 2026-11-03). `changes` uses the database names of
+    EDITABLE; only the given keys change. The old and new values go to the audit. The folder (data_dir) never changes.
+    Returns {"cambiati": [names]}."""
+    from .core.tools import QUAL_TOOLS, ROB_TOOLS
+    r = _one(conn, "SELECT * FROM review WHERE id = ?", (review_id,), "revisione")
+    new: dict = {}
+    for key, value in changes.items():
+        if key not in EDITABLE:
+            raise ReviewError(f"campo non modificabile: {key}")
+        if key in ("title", "question"):
+            value = str(value or "").strip()
+            if not value:
+                raise ReviewError("titolo e domanda non possono essere vuoti")
+        elif key == "kind" and value not in KINDS:
+            raise ReviewError(f"tipo di revisione non ammesso: {value}")
+        elif key == "status" and value not in STATUSES:
+            raise ReviewError(f"fase non ammessa: {value}")
+        elif key == "pico":
+            if not isinstance(value, Mapping):
+                raise ReviewError("PICOS non leggibile")
+            value = json.dumps({k: str(v).strip() for k, v in value.items() if str(v or "").strip()}, ensure_ascii=False)
+        elif key in ("registration", "search_strategy"):
+            value = str(value or "").strip() or None
+        elif key == "screen_reviewers":
+            try:
+                value = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ReviewError("i revisori allo screening sono un numero") from exc
+            if value < 1:
+                raise ReviewError("serve almeno un revisore allo screening")
+        elif key in ("blind_reviewers", "blind_ai"):
+            value = 1 if value in (True, 1, "1", "true", "sì", "si") else 0
+        elif key == "rob_tool_default":
+            value = value or None
+            if value and value not in ROB_TOOLS:
+                raise ReviewError(f"strumento del rischio di bias sconosciuto: {value}")
+        elif key == "qual_tool_default":
+            value = value or None
+            if value and value not in QUAL_TOOLS:
+                raise ReviewError(f"strumento della qualità sconosciuto: {value}")
+        if value != r[key]:
+            new[key] = value
+    if not new:
+        return {"cambiati": []}
+    with _write(conn):
+        conn.execute(f"UPDATE review SET {', '.join(f'{k} = ?' for k in new)} WHERE id = ?", (*new.values(), review_id))
+        audit.record(conn, actor=actor, action="review_updated", entity_type="review", entity_id=review_id,
+                     payload={"before": {k: r[k] for k in new}, "after": new}, in_transaction=True)
+    return {"cambiati": [EDITABLE[k] for k in new]}
+
+
+def withdraw_criterion(conn: sqlite3.Connection, review_id: str, criterion_id: str, *, actor: str = "user") -> None:
+    """Withdraw a criterion without a replacement: it stays in the history (superseded_by = itself). Decisions taken
+    with it keep it. At least one inclusion and one exclusion criterion must stay."""
+    c = _one(conn, "SELECT * FROM review_criterion WHERE id = ? AND review_id = ?", (criterion_id, review_id), "criterio")
+    if c["superseded_by"] is not None:
+        raise ReviewError("il criterio è già stato sostituito o ritirato")
+    if c["kind"] in ("inclusion", "exclusion"):
+        left = conn.execute("SELECT count(*) FROM review_criterion WHERE review_id = ? AND kind = ? AND superseded_by IS NULL",
+                            (review_id, c["kind"])).fetchone()[0]
+        if left <= 1:
+            raise ReviewError("serve almeno un criterio di inclusione e uno di esclusione: aggiungine un altro prima")
+    with _write(conn):
+        conn.execute("UPDATE review_criterion SET superseded_by = id WHERE id = ?", (criterion_id,))
+        audit.record(conn, actor=actor, action="review_criterion_withdrawn", entity_type="review_criterion",
+                     entity_id=criterion_id, payload={"review_id": review_id, "kind": c["kind"], "ord": c["ord"]},
+                     in_transaction=True)
+
+
 def current_criteria(conn: sqlite3.Connection, review_id: str) -> list[dict]:
     return [dict(r) for r in conn.execute("SELECT * FROM review_criterion WHERE review_id = ? AND superseded_by IS NULL "
                                           "ORDER BY kind, ord", (review_id,))]
@@ -192,7 +268,8 @@ def import_records(conn: sqlite3.Connection, review_id: str, records: Iterable[M
                    database_name: str, fmt: str, file_sha256: str, searched_on: str | None = None,
                    actor: str = "user") -> dict:
     """Store one search export. `records` are parsed records (core.records: title, abstract, authors, year, journal,
-    doi, pmid). Every record is stored; a duplicate points to the first record with the same key (`duplicate_of`).
+    doi, pmid). Every record is stored; a duplicate points to the first record with the same DOI, PMID or title
+    and year (`core.records.DedupIndex`, `duplicate_of`).
     Returns {"import_id", "record", "doppioni", "nuovi", "senza_titolo"}."""
     if fmt not in FORMATS:
         raise ReviewError(f"formato non ammesso: {fmt}")
@@ -202,10 +279,14 @@ def import_records(conn: sqlite3.Connection, review_id: str, records: Iterable[M
     _one(conn, "SELECT id FROM review WHERE id = ?", (review_id,), "revisione")
     if conn.execute("SELECT 1 FROM search_import WHERE review_id = ? AND file_sha256 = ?", (review_id, sha)).fetchone():
         raise ReviewError("questo file è già stato importato in questa revisione")
-    first: dict[str, str] = {r[0]: r[1] for r in conn.execute(
-        "SELECT dedup_key, id FROM review_record WHERE review_id = ? AND duplicate_of IS NULL ORDER BY created_at, rowid",
-        (review_id,))}
+    index = core_records.DedupIndex()
+    used: set[str] = set()
+    for r in conn.execute("""SELECT id, title, year, doi, pmid, dedup_key FROM review_record
+                             WHERE review_id = ? AND duplicate_of IS NULL ORDER BY created_at, rowid""", (review_id,)):
+        index.add(r[0], {"title": r[1], "year": r[2], "doi": r[3], "pmid": r[4]})
+        used.add(r[5])
     rows, dupes, untitled = [], 0, 0
+    reasons: dict[str, int] = {}
     for rec in records:
         title = (rec.get("title") or "").strip()
         if not title:
@@ -213,28 +294,34 @@ def import_records(conn: sqlite3.Connection, review_id: str, records: Iterable[M
             continue
         key = core_records.rec_key(dict(rec))
         rid = new_id("review_record")
-        dup = first.get(key)
+        dup, reason = index.find(dict(rec))
         if dup:
             dupes += 1
+            reasons[reason] = reasons.get(reason, 0) + 1
         else:
-            first[key] = rid
+            index.add(rid, dict(rec))
+            if key in used:  # same Tabula key but a different article (different DOI or PMID): keep the key unique
+                key = f"{key}#{rid}"
+            used.add(key)
         rows.append((rid, review_id, title, (rec.get("abstract") or None), (rec.get("authors") or None),
                      (str(rec.get("year")) if rec.get("year") else None), (rec.get("journal") or None),
-                     _doi(rec.get("doi")), _pmid(rec.get("pmid")), key, dup))
+                     _doi(rec.get("doi")), _pmid(rec.get("pmid")), key, dup,
+                     (json.dumps(list(rec["pub_types"]), ensure_ascii=False) if rec.get("pub_types") is not None else None)))
     iid = new_id("search_import")
     with _write(conn):
         conn.execute("""INSERT INTO search_import (id, review_id, source_name, database_name, format, file_sha256,
                                                    searched_on, raw_count, dupes_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                      (iid, review_id, source_name, database_name, fmt, sha, searched_on, len(rows), dupes))
         conn.executemany("""INSERT INTO review_record (id, review_id, import_id, title, abstract, authors, year, journal,
-                                                       doi, pmid, dedup_key, duplicate_of)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                       doi, pmid, dedup_key, duplicate_of, pub_types)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                          [r[:2] + (iid,) + r[2:] for r in rows])
         audit.record(conn, actor=actor, action="search_import_added", entity_type="search_import", entity_id=iid,
                      payload={"review_id": review_id, "records": len(rows), "duplicates": dupes,
-                              "without_title": untitled, "sha256": sha}, in_transaction=True)
+                              "without_title": untitled, "sha256": sha, "duplicates_by": reasons},
+                     in_transaction=True)
     return {"import_id": iid, "record": len(rows), "doppioni": dupes, "nuovi": len(rows) - dupes,
-            "senza_titolo": untitled}
+            "senza_titolo": untitled, "doppioni_per": reasons}
 
 
 # ------------------------------------------------------------------ screening
@@ -250,7 +337,7 @@ def decide(conn: sqlite3.Connection, record_id: str, reviewer_id: str, decision:
         raise ReviewError(f"origine non ammessa: {origin}")
     rec = _one(conn, "SELECT * FROM review_record WHERE id = ?", (record_id,), "record")
     if rec["duplicate_of"] is not None:
-        raise ReviewError("è un doppione: si decide sul record originale")
+        raise ReviewError("è un duplicato: si decide sul record originale")
     rv = _reviewer(conn, reviewer_id, rec["review_id"])
     human = rv["kind"] in HUMAN_KINDS
     if human and origin == "model":
@@ -311,6 +398,19 @@ def record_final(conn: sqlite3.Connection, record_id: str) -> dict:
     return final_decision(record_decisions(conn, record_id), need=need)
 
 
+def goes_to_fulltext(conn: sqlite3.Connection, record_id: str) -> bool:
+    """Who is read in full (decision of the user of 2026-11-03: "Inclusi + forse/conflitti"): included by agreement
+    or consensus, «maybe» by consensus, or every reviewer said include or maybe (two «maybe» are a conflict that the
+    full text decides). A record with an «exclude» and no consensus goes to the Consensus first."""
+    f = record_final(conn, record_id)
+    if f["status"] in ("agreed", "resolved"):
+        return f["d"] in ("include", "maybe")
+    if f["status"] != "conflict":
+        return False
+    ds = [v["d"] for k, v in record_decisions(conn, record_id).items() if k != CONSENSUS]
+    return bool(ds) and all(d in ("include", "maybe") for d in ds)
+
+
 def screening_status(conn: sqlite3.Connection, review_id: str) -> dict:
     """Counts of the final decisions over the records that are not duplicates."""
     counts: dict[str, int] = {}
@@ -332,10 +432,10 @@ def add_study(conn: sqlite3.Connection, review_id: str, *, record_id: str | None
         if rec["review_id"] != review_id:
             raise ReviewError("il record appartiene a un'altra revisione")
         if rec["duplicate_of"] is not None:
-            raise ReviewError("è un doppione: usa il record originale")
-        f = record_final(conn, record_id)
-        if f["d"] != "include" or f["status"] not in ("agreed", "resolved"):
-            raise ReviewError("il record non è incluso allo screening (serve accordo o consenso su 'include')")
+            raise ReviewError("è un duplicato: usa il record originale")
+        if not goes_to_fulltext(conn, record_id):
+            raise ReviewError("il record non passa al full text (serve «include» d'accordo o col consenso, un «forse» "
+                              "col consenso, oppure solo «include»/«forse» senza nessun «exclude»)")
         if conn.execute("SELECT 1 FROM review_study WHERE review_id = ? AND record_id = ?", (review_id, record_id)).fetchone():
             raise ReviewError("lo studio di questo record esiste già")
         if article_id is None and rec["doi"]:

@@ -96,7 +96,7 @@ def flow_problems(c: Mapping[str, int]) -> list[str]:
     out = []
     g = lambda k: c.get(k)  # noqa: E731
     if None not in (g("identified"), g("duplicates"), g("screened")) and g("identified") - g("duplicates") != g("screened"):
-        out.append(f"identificati − doppioni = {g('identified') - g('duplicates')}, ma esaminati = {g('screened')}")
+        out.append(f"identificati − duplicati = {g('identified') - g('duplicates')}, ma esaminati = {g('screened')}")
     if None not in (g("screened"), g("excluded"), g("sought")) and g("sought") > g("screened") - g("excluded"):
         out.append(f"cercati per intero ({g('sought')}) più di esaminati − esclusi ({g('screened') - g('excluded')})")
     if None not in (g("sought"), g("assessed")) and g("assessed") > g("sought"):

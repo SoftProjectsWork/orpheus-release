@@ -219,7 +219,7 @@ function Invoke-Leggi {
     Write-Log ("  DOI trovato: {0} articoli su {1} ({2})" -f ($s.articoli - $s.senza_doi), $s.articoli, $doiFrom)
     Write-Log ("  Riviste: " + (Format-Counts $s.riviste))
     if ($s.contenuto) { Write-Log ("  Contenuto: " + (Format-Counts $s.contenuto)) }
-    Write-Log ("  Abstract di congresso: {0} - Scansioni (testo da OCR): {1} - Possibili doppioni: {2} - Stesso titolo: {3}" -f `
+    Write-Log ("  Abstract di congresso: {0} - Scansioni (testo da OCR): {1} - Possibili duplicati: {2} - Stesso titolo: {3}" -f `
                $s.abstract_di_congresso, $s.scansioni_ocr, $s.possibili_doppioni, $s.stesso_titolo)
     if ($s.verifica_doi) { Write-Log ("  Verifica dei DOI con Crossref: " + (Format-Counts $s.verifica_doi)) }
     # @( ) intorno: in PowerShell 5.1 un solo risultato non e' un elenco e .Count resterebbe vuoto
@@ -457,7 +457,7 @@ function Invoke-Doppioni {
     $j = $r.Json
     Write-Log "  Risposte di Crossref lette: $($j.risposte_crossref_lette)  (problemi: $(@($j.problemi).Count))"
     $c = Format-Counts $j.conteggi
-    if ($c) { Write-Log "  Coppie trovate: $c" } else { Write-Log '  Nessun possibile doppione.' }
+    if ($c) { Write-Log "  Coppie trovate: $c" } else { Write-Log '  Nessun possibile duplicato.' }
     Write-Log "  Autori (proposta, NON scritta nel database): $(Format-Counts $j.autori_proposta)"
     Write-Log "  Elenco delle coppie (si apre con Excel): $($j.file_csv)"
 }

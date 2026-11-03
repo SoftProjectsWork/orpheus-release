@@ -137,6 +137,16 @@ Methods and statistics of the published articles (T-057; user's decisions of 202
                        N are open (sport, exercise and biomechanics first); --completa N: up to N completion packets of
                        the cards written with obiettivi-v1 (natura_studio, replicazione, tipo_obiettivo again);
                        --controlla: the checks on one card, nothing written
+  eurydike-screening [--revisione ID] [--lotti N] [--invia] [--controlla RISPOSTA PACCHETTO] [--prova]  T-051e
+                       (eurydike-screen-v1): lots of 25 records for Claude (blind) in revisioni/<nome>/screening/pacchetti,
+                       Claude's answers from screening/da_inviare into screening_decision (backup first)
+  eurydike-estrazione --controlla RISPOSTA PACCHETTO  E6 (eurydike-extract-v1): checks one extraction of Claude
+                       (card fields and fields of the review) against its packet; nothing written
+  eurydike-bias --controlla RISPOSTA PACCHETTO  E7 (eurydike-appraisal-v1): checks one risk-of-bias and quality
+                       appraisal of Claude against its packet; nothing written
+  eurydike-fulltext --controlla RISPOSTA PACCHETTO  E5 (eurydike-ft-v1): checks one proposal of Claude on a full text
+                       against its packet (the quote must be on the cited page); the packets and the answers are
+                       handled from the dashboard (EURYDIKE → Full text)
   riscontri [--controlla FILE PACCHETTO] [--prova]  T-056 (feedback-v1): the classifications of the comments of
                        editors and reviewers written by Claude (rapporti/riscontri/da_inviare) into the database as
                        proposals (backup first), then the packets of the letters still to classify; counts only (R10)
@@ -957,6 +967,69 @@ def cmd_objectives(args) -> int:
             "stato": objectives.status(ctx.conn)}
     _print({**out, **_finish(ctx, wrote=wrote)})
     return 0 if not (res.problems or res_c.problems) else 3
+
+
+def cmd_eurydike_screening(args) -> int:
+    """eurydike-screening (T-051e, eurydike-screen-v1): lots of 25 records for Claude (blind) and Claude's answers.
+    --controlla: one answer against its packet (no database); else --invia reads the answers in screening/da_inviare
+    (backup first) and --lotti N opens lots until N are open."""
+    from .eurydike import screening as sc
+    if args.controlla:
+        try:
+            probs = sc.check_with_packet_files(Path(args.controlla[0]), Path(args.controlla[1]))
+        except (OSError, ValueError) as exc:
+            raise CliError(f"File non leggibile: {exc}") from exc
+        _print({"esito": "accettabile" if not probs else "da correggere", "contratto": sc.CONTRACT, "problemi": probs[:60]})
+        return 0 if not probs else 4
+    if not args.revisione:
+        raise CliError("Indica la revisione: --revisione ID (lo vedi nel cruscotto, EURYDIKE → Protocollo)")
+    ctx = _open(write=not args.prova)
+    rid = args.revisione
+    if not ctx.conn.execute("SELECT 1 FROM review WHERE id = ?", (rid,)).fetchone():
+        raise CliError(f"Revisione {rid} non trovata")
+    out: dict = {"contratto": sc.CONTRACT, "revisione": rid}
+    if args.prova:
+        _print({**out, "modo": "prova", "stato": sc.status(ctx.conn, rid), **_finish(ctx, wrote=False)})
+        return 0
+    wrote = False
+    if args.invia or args.lotti:
+        entry = backups.make_backup(ctx.conn, ctx.state, reason="before_screening")
+        out["backup_prima_della_scrittura"] = str(ctx.state.backup_dir / entry["file"])
+    if args.invia:
+        out["invio"] = sc.submit(ctx.conn, ctx.home, rid)
+        wrote = wrote or bool(out["invio"]["inviate"])
+    if args.lotti:
+        out["lotti"] = sc.issue_lots(ctx.conn, ctx.home, rid, args.lotti, project_name=ctx.project.name,
+                                     project_version=ctx.project.version)
+        wrote = wrote or bool(out["lotti"]["nuovi"])
+    out["stato"] = sc.status(ctx.conn, rid)
+    _print({**out, **_finish(ctx, wrote=wrote)})
+    return 0
+
+
+def cmd_eurydike_fulltext(args) -> int:
+    """eurydike-fulltext (E5, eurydike-ft-v1): --controlla checks one answer of Claude against its packet (no database)."""
+    from .eurydike import fulltext as ft
+    probs = ft.check_with_packet_files(Path(args.controlla[0]), Path(args.controlla[1]))
+    _print({"esito": "accettabile" if not probs else "da correggere", "contratto": ft.CONTRACT, "problemi": probs[:60]})
+    return 0 if not probs else 4
+
+
+def cmd_eurydike_extraction(args) -> int:
+    """eurydike-estrazione (E6, eurydike-extract-v1): --controlla checks one extraction of Claude against its packet
+    (card fields and fields of the review; no database)."""
+    from .eurydike import extraction as ex
+    probs = ex.check_with_packet_files(Path(args.controlla[0]), Path(args.controlla[1]))
+    _print({"esito": "accettabile" if not probs else "da correggere", "contratto": ex.CONTRACT, "problemi": probs[:60]})
+    return 0 if not probs else 4
+
+
+def cmd_eurydike_appraisal(args) -> int:
+    """eurydike-bias (E7, eurydike-appraisal-v1): --controlla checks one appraisal of Claude against its packet."""
+    from .eurydike import appraisal as ap
+    probs = ap.check_with_packet_files(Path(args.controlla[0]), Path(args.controlla[1]))
+    _print({"esito": "accettabile" if not probs else "da correggere", "contratto": ap.CONTRACT, "problemi": probs[:60]})
+    return 0 if not probs else 4
 
 
 def cmd_feedback(args) -> int:
@@ -2357,6 +2430,26 @@ def main(argv: list[str] | None = None) -> int:
                    help="completion packets (obiettivi-v2 fields) of the cards written with obiettivi-v1 open after the run")
     p.add_argument("--prova", action="store_true", help="what would be sent and issued; nothing written")
     p.set_defaults(func=cmd_objectives)
+    p = sub.add_parser("eurydike-screening")
+    p.add_argument("--revisione", help="id of the review (rev_...)")
+    p.add_argument("--lotti", type=int, default=0, help="open lots of 25 records for Claude until N are open")
+    p.add_argument("--invia", action="store_true", help="read Claude's answers in screening/da_inviare")
+    p.add_argument("--controlla", nargs=2, metavar=("RISPOSTA", "PACCHETTO"),
+                   help="check one answer against its packet, nothing written (for Claude)")
+    p.add_argument("--prova", action="store_true", help="state only; nothing written")
+    p.set_defaults(func=cmd_eurydike_screening)
+    p = sub.add_parser("eurydike-fulltext")
+    p.add_argument("--controlla", nargs=2, metavar=("RISPOSTA", "PACCHETTO"), required=True,
+                   help="check one answer of Claude against its full-text packet, nothing written")
+    p.set_defaults(func=cmd_eurydike_fulltext)
+    p = sub.add_parser("eurydike-estrazione")
+    p.add_argument("--controlla", nargs=2, metavar=("RISPOSTA", "PACCHETTO"), required=True,
+                   help="check one extraction of Claude against its packet, nothing written")
+    p.set_defaults(func=cmd_eurydike_extraction)
+    p = sub.add_parser("eurydike-bias")
+    p.add_argument("--controlla", nargs=2, metavar=("RISPOSTA", "PACCHETTO"), required=True,
+                   help="check one risk-of-bias appraisal of Claude against its packet, nothing written")
+    p.set_defaults(func=cmd_eurydike_appraisal)
     p = sub.add_parser("riscontri")
     p.add_argument("--controlla", nargs=2, metavar=("FILE", "PACCHETTO"),
                    help="check one classification against its packet, nothing written (for Claude)")

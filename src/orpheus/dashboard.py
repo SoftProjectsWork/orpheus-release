@@ -1114,15 +1114,351 @@ def eurydike_new_review(s: Settings, conn, body: dict) -> dict:
     return _protected_write(s, conn, lambda: protocol.new_review(conn, s.home, body))
 
 
+def eurydike_edit_review(s: Settings, conn, review_id: str, body: dict) -> dict:
+    from .eurydike import protocol
+    return _protected_write(s, conn, lambda: protocol.edit_review(conn, s.home, review_id, body))
+
+
+def eurydike_edit_criterion(s: Settings, conn, review_id: str, body: dict) -> dict:
+    from .eurydike import protocol
+    return _protected_write(s, conn, lambda: protocol.edit_criterion(conn, s.home, review_id, body))
+
+
+SEARCH_FOLDERS = "cartelle_ricerca.json"     # local folder of the PC: {review id: folder of the exported files}
+
+
+def _search_folders(s: Settings) -> dict:
+    try:
+        d = json.loads((Path(s.local_root) / SEARCH_FOLDERS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in d.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(d, dict) else {}
+
+
+def search_folder(s: Settings, review_id: str) -> Path | None:
+    """The folder chosen for the import of this review on this PC (2026-11-03: «Scegli cartella», like Manoscritti),
+    or None (the review's own `ricerca` folder). Kept on the PC: paths differ between PCs."""
+    p = _search_folders(s).get(review_id)
+    return Path(p) if p else None
+
+
+def set_search_folder(s: Settings, review_id: str, path: str | None) -> dict:
+    d = _search_folders(s)
+    if path:
+        p = Path(str(path).strip().strip('"'))
+        if not p.is_absolute():
+            raise ValueError("scrivi il percorso completo della cartella")
+        if not p.is_dir():
+            raise ValueError(f"cartella non trovata: {p}")
+        d[review_id] = str(p)
+    else:
+        d.pop(review_id, None)
+    f = Path(s.local_root) / SEARCH_FOLDERS
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+    return {"cartella": d.get(review_id)}
+
+
+def choose_folder_dialog(s: Settings) -> str | None:
+    """The Windows window to choose a folder (the page runs on this PC): the chosen path or None if cancelled."""
+    if os.name != "nt":
+        raise ValueError("la finestra per scegliere la cartella c'è solo su Windows: incolla il percorso completo")
+    script = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; "
+              "$o=New-Object System.Windows.Forms.Form -Property @{TopMost=$true}; "
+              "$d=New-Object System.Windows.Forms.FolderBrowserDialog; "
+              "$d.Description='Cartella dei file esportati dalle banche dati (EURYDIKE)'; "
+              "if($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK){ $d.SelectedPath }")
+    r = subprocess.run([s.powershell, "-NoProfile", "-STA", "-Command", script], capture_output=True, timeout=900,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    out = r.stdout.decode("utf-8", "replace").strip()
+    return out or None
+
+
+def eurydike_choose_search_folder(s: Settings, review_id: str, body: dict) -> dict:
+    if body.get("predefinita"):
+        return set_search_folder(s, review_id, None)
+    path = str(body.get("percorso") or "").strip() or choose_folder_dialog(s)
+    if not path:
+        return {"cartella": None, "annullato": True}
+    return set_search_folder(s, review_id, path)
+
+
 def eurydike_import(s: Settings, conn, review_id: str) -> dict:
     from .eurydike import protocol
-    return _protected_write(s, conn, lambda: protocol.import_new(conn, s.home, review_id))
+    return _protected_write(s, conn, lambda: protocol.import_new(conn, s.home, review_id,
+                                                                 folder=search_folder(s, review_id)))
 
 
 def eurydike_search_files(s: Settings, conn, review_id: str) -> dict:
     from .eurydike import protocol
-    return {**protocol.search_files(conn, s.home, review_id), **_src("cartella ricerca della revisione, search_import",
-                                                                     utc_now())}
+    return {**protocol.search_files(conn, s.home, review_id, search_folder(s, review_id)),
+            **_src("cartella della ricerca scelta per la revisione, search_import", utc_now())}
+
+
+def eurydike_duplicates(s: Settings, conn, rid: str, q=None) -> dict:
+    """Duplicates checked by a person (2026-11-03): one page of pairs (both records) and the counts."""
+    from .eurydike import duplicates as du
+    q = q or {}
+    try:
+        da, quanti = max(0, int(q.get("da") or 0)), min(100, max(1, int(q.get("quanti") or 20)))
+    except ValueError as exc:
+        raise ValueError("da e quanti sono numeri") from exc
+    out = du.page(conn, rid, stato=q.get("stato") or "da_decidere", tipo=q.get("tipo") or "", da=da, quanti=quanti)
+    return {**out, **_src("review_record, search_import; decisioni sulle coppie nell'audit", utc_now())}
+
+
+def eurydike_duplicates_decide(s: Settings, conn, rid: str, body: dict) -> dict:
+    from .eurydike import duplicates as du
+    return _protected_write(s, conn, lambda: du.decide_pair(conn, rid, str(body.get("record") or ""),
+                                                            str(body.get("altro") or ""), str(body.get("doppione") or ""),
+                                                            keep=(str(body["tieni"]) if body.get("tieni") else None)))
+
+
+def eurydike_duplicates_confirm(s: Settings, conn, rid: str, body: dict) -> dict:
+    from .eurydike import duplicates as du
+    return _protected_write(s, conn, lambda: du.confirm_found(conn, rid, reason=str(body.get("motivo") or "doi")))
+
+
+def eurydike_ft_board(s: Settings, conn, rid: str, q) -> dict:
+    """Full text (E5, 2026-11-03): studies, PDFs, decisions; Claude's proposal only after the user's decision."""
+    from .eurydike import fulltext as ft
+    return {**ft.board(conn, s.home, rid, filtro=q.get("filtro") or "tutti"),
+            **_src("review_study, document, ft_proposal (proposta di Claude nascosta finché non decidi)", utc_now())}
+
+
+def eurydike_ft_write(s: Settings, conn, rid: str, action: str, body: dict) -> dict:
+    from .eurydike import fulltext as ft
+    archive = Path(s.home) / getattr(s.project.storage, "archive_dir", "data/archive")
+    if action == "prepara":
+        fn = lambda: ft.prepare(conn, rid)                                       # noqa: E731
+    elif action == "leggi_pdf":
+        fn = lambda: ft.read_pdfs(conn, s.home, rid, archive_dir=archive)        # noqa: E731
+    elif action == "collega":
+        fn = lambda: (ft.link_document(conn, rid, str(body.get("studio") or ""), str(body.get("documento") or "")) or {"ok": True})  # noqa: E731
+    elif action == "pacchetti":
+        try:
+            n = int(body.get("quanti") or 5)
+        except ValueError as exc:
+            raise ValueError("il numero dei pacchetti è un numero") from exc
+        fn = lambda: ft.issue_packets(conn, s.home, rid, max(1, n), project_name="ORPHEUS",  # noqa: E731
+                                      project_version=getattr(s.project, "version", "") or "")
+    elif action == "risposte":
+        fn = lambda: ft.submit(conn, s.home, rid)                                # noqa: E731
+    elif action == "decisione":
+        txt = lambda k: (str(body[k]).strip() or None) if body.get(k) not in (None, "") else None  # noqa: E731
+        fn = lambda: ft.decide(conn, rid, str(body.get("studio") or ""), str(body.get("decisione") or ""),  # noqa: E731
+                               criterion_id=txt("criterio"), note=txt("nota"), label=txt("revisore"))
+    else:
+        raise ValueError("azione sconosciuta")
+    return _protected_write(s, conn, fn)
+
+
+def eurydike_ex_board(s: Settings, conn, rid: str, q) -> dict:
+    """Extraction (E6, 2026-11-03): the form, the included studies and what is left to check."""
+    from .eurydike import extraction as ex
+    return {**ex.board(conn, s.home, rid, label=q.get("revisore") or None),
+            **_src("extraction_form, form_field, extraction_value, card_item (eurydike-extract-v1)", utc_now())}
+
+
+def eurydike_ex_study(s: Settings, conn, rid: str, sid: str, q) -> dict:
+    from .eurydike import extraction as ex
+    return {**ex.study(conn, rid, sid, label=q.get("revisore") or None),
+            **_src("extraction_value, card_item, card_outcome_row", utc_now())}
+
+
+def eurydike_ex_write(s: Settings, conn, rid: str, action: str, body: dict) -> dict:
+    from .eurydike import extraction as ex
+    txt = lambda k: (str(body[k]).strip() or None) if body.get(k) not in (None, "") else None  # noqa: E731
+    label = txt("revisore")
+    if action == "modulo":
+        fn = lambda: ex.save_form(conn, rid, list(body.get("campi_scheda") or []), list(body.get("campi_revisione") or []))  # noqa: E731
+    elif action == "blocca":
+        fn = lambda: ex.freeze(conn, rid)                                        # noqa: E731
+    elif action == "collega_articoli":
+        fn = lambda: ex.link_articles(conn, rid)                                 # noqa: E731
+    elif action == "pacchetti":
+        try:
+            n = int(body.get("quanti") or 5)
+        except ValueError as exc:
+            raise ValueError("il numero dei pacchetti è un numero") from exc
+        fn = lambda: ex.issue_packets(conn, s.home, rid, max(1, n), project_name="ORPHEUS",  # noqa: E731
+                                      project_version=getattr(s.project, "version", "") or "")
+    elif action == "risposte":
+        fn = lambda: ex.submit(conn, s.home, rid)                                # noqa: E731
+    elif action == "valore":
+        page = txt("pagina")
+        try:
+            page = int(page) if page is not None else None
+        except ValueError as exc:
+            raise ValueError("la pagina è un numero") from exc
+        state = {"conferma": "confirmed", "correggi": "edited", "nr": "nr"}.get(str(body.get("azione") or ""))
+        if state is None:
+            raise ValueError("azione: conferma, correggi o nr")
+        fn = lambda: ex.decide_value(conn, rid, str(body.get("studio") or ""), str(body.get("campo") or ""), state,  # noqa: E731
+                                     value=body.get("valore"), quote=txt("citazione"), page=page, note=txt("nota"),
+                                     label=label)
+    elif action == "conferma_esatte":
+        fn = lambda: ex.confirm_exact(conn, rid, str(body.get("studio") or ""), label=label)  # noqa: E731
+    else:
+        raise ValueError("azione sconosciuta")
+    return _protected_write(s, conn, fn)
+
+
+def eurydike_rb_board(s: Settings, conn, rid: str, q) -> dict:
+    """Risk of bias and quality (E7, 2026-11-03): tools proposed and chosen, Claude's packets, what is left to check."""
+    from .eurydike import appraisal as ap
+    return {**ap.board(conn, s.home, rid, label=q.get("revisore") or None),
+            **_src("appraisal_tool_choice, appraisal (strumenti di Tabula v19, eurydike-appraisal-v1)", utc_now())}
+
+
+def eurydike_rb_study(s: Settings, conn, rid: str, sid: str, q) -> dict:
+    from .eurydike import appraisal as ap
+    return {**ap.study(conn, rid, sid, label=q.get("revisore") or None),
+            **_src("appraisal, appraisal_tool_choice", utc_now())}
+
+
+def eurydike_rb_write(s: Settings, conn, rid: str, action: str, body: dict) -> dict:
+    from .eurydike import appraisal as ap
+    txt = lambda k: (str(body[k]).strip() or None) if body.get(k) not in (None, "") else None  # noqa: E731
+    label, sid = txt("revisore"), str(body.get("studio") or "")
+    if action == "usa_proposte":
+        fn = lambda: ap.accept_proposals(conn, rid, label=label)                 # noqa: E731
+    elif action == "strumento":
+        fn = lambda: ap.choose(conn, rid, sid, str(body.get("tipo") or ""), txt("strumento"), label=label)  # noqa: E731
+    elif action == "pacchetti":
+        try:
+            n = int(body.get("quanti") or 5)
+        except ValueError as exc:
+            raise ValueError("il numero dei pacchetti è un numero") from exc
+        fn = lambda: ap.issue_packets(conn, s.home, rid, max(1, n), project_name="ORPHEUS",  # noqa: E731
+                                      project_version=getattr(s.project, "version", "") or "")
+    elif action == "risposte":
+        fn = lambda: ap.submit(conn, s.home, rid)                                # noqa: E731
+    elif action == "giudizio":
+        page = txt("pagina")
+        try:
+            page = int(page) if page is not None else None
+        except ValueError as exc:
+            raise ValueError("la pagina è un numero") from exc
+        fn = lambda: ap.decide(conn, rid, sid, str(body.get("strumento") or ""), str(body.get("voce") or ""),  # noqa: E731
+                               str(body.get("giudizio") or ""), rationale=txt("motivo"), quote=txt("citazione"),
+                               page=page, label=label)
+    elif action == "conferma_esatte":
+        fn = lambda: ap.confirm_exact(conn, rid, sid, label=label)               # noqa: E731
+    else:
+        raise ValueError("azione sconosciuta")
+    return _protected_write(s, conn, fn)
+
+
+def eurydike_rules_read(s: Settings, conn, rid: str, q) -> dict:
+    """Bulk rules of the screening (0.70.0): the rules with their counts, the publication types, the preview."""
+    from .eurydike import rules as ru
+    from .eurydike import screening as sc
+    label = q.get("revisore") or None
+    if q.get("tipo"):
+        params = {"parole": q.get("parole") or "", "dove": q.get("dove") or "titolo", "prima_di": q.get("prima_di"),
+                  "dopo": q.get("dopo"), "tipi": q.get("tipi") or ""}
+        return ru.preview(conn, rid, q.get("tipo"), params)
+    return {"regole": ru.rules(conn, rid, label=label), **ru.pub_type_counts(conn, rid),
+            "criteri": [c for c in sc._criteria(conn, rid) if c["tipo"] == "exclusion"],
+            "fuori_da_claude": len(ru.skipped_for_claude(conn, rid)),
+            **_src("screening_rule, screening_rule_answer, review_record.pub_types", utc_now())}
+
+
+def eurydike_rules_write(s: Settings, conn, rid: str, action: str, body: dict) -> dict:
+    from .eurydike import rules as ru
+    label = (str(body.get("revisore") or "").strip() or None)
+    if action == "aggiungi":
+        fn = lambda: ru.add_rule(conn, rid, str(body.get("tipo") or ""), body, str(body.get("criterio") or ""),  # noqa: E731
+                                 label=label, why=body.get("motivo"))
+    elif action == "togli":
+        fn = lambda: (ru.remove_rule(conn, rid, str(body.get("regola") or "")) or {"ok": True})  # noqa: E731
+    elif action == "risposta":
+        fn = lambda: ru.answer(conn, rid, str(body.get("regola") or ""), str(body.get("record") or ""),  # noqa: E731
+                               {"conferma": "confirmed", "rifiuta": "rejected"}.get(body.get("risposta"), str(body.get("risposta") or "")),
+                               label=label)
+    elif action == "tipi":
+        fn = lambda: ru.fill_pub_types(conn, s.home, rid, folder=search_folder(s, rid))  # noqa: E731
+    else:
+        raise ValueError("azione sconosciuta")
+    return _protected_write(s, conn, fn)
+
+
+def eurydike_board(s: Settings, conn, rid: str, q) -> dict:
+    """Screening workspace (2026-11-03): the records of one reviewer with filters and counts."""
+    from .eurydike import workspace as ws
+    try:
+        da, quanti = int(q.get("da") or 0), int(q.get("quanti") or 50)
+    except ValueError as exc:
+        raise ValueError("da e quanti sono numeri") from exc
+    return {**ws.board(conn, rid, label=q.get("revisore") or None, filtro=q.get("filtro") or "da_decidere",
+                       q=q.get("q") or "", parola=q.get("parola") or "", etichetta=q.get("etichetta") or "",
+                       motivo=q.get("motivo") or "", n_decisioni=q.get("numero") or "qualsiasi", da=da, quanti=quanti),
+            **_src("review_record, screening_decision, review_keyword, record_label", utc_now())}
+
+
+def eurydike_board_record(s: Settings, conn, rid: str, rec: str, q) -> dict:
+    from .eurydike import workspace as ws
+    return ws.record_detail(conn, rid, rec, label=q.get("revisore") or None)
+
+
+def eurydike_keywords_write(s: Settings, conn, rid: str, body: dict) -> dict:
+    from .eurydike import workspace as ws
+
+    def run():
+        if body.get("azione") == "togli":
+            ws.remove_keyword(conn, rid, str(body.get("id") or ""))
+        else:
+            ws.add_keyword(conn, rid, str(body.get("tipo") or ""), str(body.get("parola") or ""))
+        return {"parole": ws.keywords(conn, rid)}
+    return _protected_write(s, conn, run)
+
+
+def eurydike_labels_write(s: Settings, conn, rid: str, body: dict) -> dict:
+    from .eurydike import workspace as ws
+
+    def run():
+        rec = str(body.get("record") or "")
+        if body.get("azione") == "togli":
+            ws.remove_label(conn, rid, rec, str(body.get("etichetta") or ""))
+        else:
+            ws.add_label(conn, rid, rec, str(body.get("etichetta") or ""))
+        return {"etichette": ws._labels(conn, rid).get(rec, [])}
+    return _protected_write(s, conn, run)
+
+
+def eurydike_to_screen(s: Settings, conn, rid: str, q) -> dict:
+    """T-051e: the next record for the user (blind) and the state of the lots for Claude."""
+    from .eurydike import screening as sc
+    return {**sc.next_for_user(conn, rid, q.get("revisore") or None), "stato": sc.status(conn, rid),
+            **_src("review_record, screening_decision, workflow_run (eurydike-screen-v1)", utc_now())}
+
+
+def eurydike_screen_decide(s: Settings, conn, rid: str, body: dict) -> dict:
+    from .eurydike import screening as sc
+    txt = lambda k: (str(body[k]).strip() or None) if body.get(k) not in (None, "") else None  # noqa: E731
+    return _protected_write(s, conn, lambda: {
+        **sc.decide_user(conn, rid, str(body.get("record") or ""), str(body.get("decisione") or ""),
+                         criterion_id=txt("criterio"), rationale=txt("motivo"), label=txt("revisore"),
+                         consensus=bool(body.get("consenso"))),
+        "prossimo": None if body.get("consenso") else sc.next_for_user(conn, rid, txt("revisore"))})
+
+
+def eurydike_screen_lots(s: Settings, conn, rid: str, body: dict) -> dict:
+    from .eurydike import screening as sc
+    try:
+        n = int(body.get("quanti") or 4)
+    except ValueError as exc:
+        raise ValueError("il numero dei lotti è un numero") from exc
+    return _protected_write(s, conn, lambda: sc.issue_lots(conn, s.home, rid, max(1, n), project_name="ORPHEUS",
+                                                           project_version=getattr(s.project, "version", "") or ""))
+
+
+def eurydike_screen_answers(s: Settings, conn, rid: str) -> dict:
+    from .eurydike import screening as sc
+    return _protected_write(s, conn, lambda: sc.submit(conn, s.home, rid))
 
 
 def eurydike_tools() -> dict:
@@ -1243,6 +1579,18 @@ def abbreviations(s: Settings) -> dict:
 TEXTS_FILE = "testi_cruscotto.json"      # in the data folder: the same texts on every PC that uses the disk
 
 
+def developer_mode() -> bool:
+    """«Modifica i testi» only for the owner of the code (request of the user of 2026-11-03 12:11): his changes become
+    the default texts in the code and reach the colleagues with a release. True when the code runs from the git
+    clone (the owner's PCs; the public package has no .git); ORPHEUS_SVILUPPATORE=1 / 0 forces it."""
+    env = os.environ.get("ORPHEUS_SVILUPPATORE", "").strip().lower()
+    if env in ("1", "si", "sì", "true", "yes"):
+        return True
+    if env in ("0", "no", "false"):
+        return False
+    return (Path(__file__).resolve().parents[2] / ".git").exists()
+
+
 def page_texts(s: Settings) -> dict:
     """The texts of the page changed by the user (2026-10-30): {original Italian text: new text}."""
     try:
@@ -1272,19 +1620,78 @@ def set_page_text(s: Settings, original: str, new: str) -> dict:
 
 LOOK_FILE = "aspetto_cruscotto.json"     # in the data folder: style and blocks of each section, the same on every PC
 STYLES = ("classico", "moderno", "industriale", "oceano", "terra")
+# custom styles (2026-11-03): the same tokens as tools/stili/genera_stili.py; never the module colours
+STYLE_FONTS = ("atkinson", "serif", "sistema", "georgia", "verdana", "trebuchet", "mono")
+STYLE_PATTERNS = ("nessuno", "punti", "griglia", "onde", "curve", "diagonali", "macchie")
+STYLE_SHADOWS = ("nessuna", "lieve", "media", "forte")
+STYLE_SPACES = ("compatta", "normale", "ariosa")
+STYLE_COLOURS = ("bg", "bg2", "panel", "sunk", "ink", "ink2", "ink3", "rule", "rule2", "good", "warn", "crit")
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+def _custom_style(x: dict) -> dict:
+    """A custom style checked value by value (anything else is refused)."""
+    if not isinstance(x, dict):
+        raise ValueError("stile personale non valido")
+    sid = str(x.get("id") or "")
+    if not re.fullmatch(r"p-[a-z0-9]{1,24}", sid):
+        raise ValueError("nome interno dello stile non valido")
+    name = str(x.get("nome") or "").strip()
+    if not name or len(name) > 40:
+        raise ValueError("dai un nome allo stile (al massimo 40 caratteri)")
+
+    def pick(key, allowed):
+        if x.get(key) not in allowed:
+            raise ValueError(f"valore non ammesso per {key}")
+        return x[key]
+
+    def num(key, lo, hi):
+        try:
+            v = int(x.get(key))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key}: serve un numero") from exc
+        if not lo <= v <= hi:
+            raise ValueError(f"{key}: tra {lo} e {hi}")
+        return v
+
+    out = {"id": sid, "nome": name, "testo": pick("testo", STYLE_FONTS), "titoli": pick("titoli", STYLE_FONTS),
+           "dimensione": num("dimensione", 13, 19), "angoli": num("angoli", 0, 24), "ombra": pick("ombra", STYLE_SHADOWS),
+           "spazio": pick("spazio", STYLE_SPACES), "motivo": pick("motivo", STYLE_PATTERNS),
+           "intensita": num("intensita", 0, 15)}
+    for theme in ("chiaro", "scuro"):
+        c = x.get(theme)
+        if not isinstance(c, dict):
+            raise ValueError(f"colori del tema {theme} mancanti")
+        out[theme] = {}
+        for k in STYLE_COLOURS:
+            v = c.get(k)
+            if v in (None, "") and k in ("good", "warn", "crit"):
+                continue
+            if not isinstance(v, str) or not _HEX.fullmatch(v):
+                raise ValueError(f"colore {k} ({theme}) non valido")
+            out[theme][k] = v.lower()
+    return out
 
 
 def page_look(s: Settings) -> dict:
-    """The look chosen by the user (2026-10-30): {"stile": ..., "sezioni": {section: {ordine, nascosti, larghezza}}}."""
+    """The look chosen by the user (2026-10-30, 2026-11-03): {"stile", "contrasto", "personali": {id: style},
+    "sezioni": {section: {ordine, nascosti, larghezza}}}."""
     try:
         d = json.loads((Path(s.home) / LOOK_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         d = {}
     if not isinstance(d, dict):
         d = {}
-    style = d.get("stile") if d.get("stile") in STYLES else "classico"
+    custom = {}
+    for k, v in (d.get("personali") or {}).items() if isinstance(d.get("personali"), dict) else []:
+        try:
+            custom[k] = _custom_style(v)
+        except ValueError:
+            continue                                     # a broken custom style is left out, never shown
+    style = d.get("stile") if d.get("stile") in STYLES or d.get("stile") in custom else "classico"
     sections = d.get("sezioni") if isinstance(d.get("sezioni"), dict) else {}
-    return {"stile": style, "sezioni": sections}
+    contrast = d.get("contrasto") if d.get("contrasto") in ("normale", "alto") else "normale"
+    return {"stile": style, "contrasto": contrast, "personali": custom, "sezioni": sections}
 
 
 def _keys(value, limit=200) -> list[str]:
@@ -1301,8 +1708,22 @@ def _keys(value, limit=200) -> list[str]:
 def set_page_look(s: Settings, body: dict) -> dict:
     """Changes the style, or the layout of one section (order, hidden blocks, width), or restores a section."""
     d = page_look(s)
+    if "stile_personale" in body:
+        st = _custom_style(body["stile_personale"])
+        if st["id"] not in d["personali"] and len(d["personali"]) >= 20:
+            raise ValueError("al massimo 20 stili personali")
+        d["personali"][st["id"]] = st
+    if "elimina_stile" in body:
+        sid = str(body["elimina_stile"])
+        d["personali"].pop(sid, None)
+        if d["stile"] == sid:
+            d["stile"] = "classico"
+    if "contrasto" in body:
+        if body["contrasto"] not in ("normale", "alto"):
+            raise ValueError("contrasto: normale o alto")
+        d["contrasto"] = body["contrasto"]
     if "stile" in body:
-        if body["stile"] not in STYLES:
+        if body["stile"] not in STYLES and body["stile"] not in d["personali"]:
             raise ValueError("stile sconosciuto")
         d["stile"] = body["stile"]
     if "sezione" in body:
@@ -1372,7 +1793,8 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
 
     def index(_request):
         page = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(page.replace("__ORPHEUS_TOKEN__", token).replace("__ORPHEUS_VERSION__", __version__))
+        return HTMLResponse(page.replace("__ORPHEUS_TOKEN__", token).replace("__ORPHEUS_VERSION__", __version__)
+                            .replace("__ORPHEUS_DEV__", "1" if developer_mode() else "0"))
 
     def start_lavora(request: Request):
         if request.headers.get("x-orpheus-token") != token:
@@ -1597,12 +2019,146 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         rid = request.path_params["rid"]
         return await eurydike_post(request, lambda c, b: eurydike_import(s, c, rid))
 
+    def board_endpoint(request, conn):
+        from .eurydike import review as rv
+        from .eurydike import workspace as ws
+        try:
+            return eurydike_board(s, conn, request.path_params["rid"], request.query_params)
+        except (rv.ReviewError, ws.WorkspaceError) as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=422)
+
+    def board_record_endpoint(request, conn):
+        from .eurydike import review as rv
+        from .eurydike import workspace as ws
+        try:
+            return eurydike_board_record(s, conn, request.path_params["rid"], request.path_params["rec"], request.query_params)
+        except (rv.ReviewError, ws.WorkspaceError) as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+
+    def ft_board_endpoint(request, conn):
+        from .eurydike import fulltext as ft
+        try:
+            return eurydike_ft_board(s, conn, request.path_params["rid"], request.query_params)
+        except ft.FullTextError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+
+    def rules_endpoint(request, conn):
+        from .eurydike import rules as ru
+        try:
+            return eurydike_rules_read(s, conn, request.path_params["rid"], request.query_params)
+        except ru.RuleError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=422)
+
+    async def rules_write_endpoint(request: Request):
+        rid, action = request.path_params["rid"], request.path_params["azione"]
+        return await eurydike_post(request, lambda c, b: eurydike_rules_write(s, c, rid, action, b))
+
+    async def search_folder_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await simple_post(request, lambda b: eurydike_choose_search_folder(s, rid, b))
+
+    async def rb_write_endpoint(request: Request):
+        rid, action = request.path_params["rid"], request.path_params["azione"]
+        return await eurydike_post(request, lambda c, b: eurydike_rb_write(s, c, rid, action, b))
+
+    def rb_board_endpoint(request, conn):
+        return eurydike_rb_board(s, conn, request.path_params["rid"], request.query_params)
+
+    def rb_study_endpoint(request, conn):
+        return eurydike_rb_study(s, conn, request.path_params["rid"], request.path_params["sid"], request.query_params)
+
+    async def ex_write_endpoint(request: Request):
+        rid, action = request.path_params["rid"], request.path_params["azione"]
+        return await eurydike_post(request, lambda c, b: eurydike_ex_write(s, c, rid, action, b))
+
+    def ex_board_endpoint(request, conn):
+        return eurydike_ex_board(s, conn, request.path_params["rid"], request.query_params)
+
+    def ex_study_endpoint(request, conn):
+        return eurydike_ex_study(s, conn, request.path_params["rid"], request.path_params["sid"], request.query_params)
+
+    async def ft_write_endpoint(request: Request):
+        rid, action = request.path_params["rid"], request.path_params["azione"]
+        return await eurydike_post(request, lambda c, b: eurydike_ft_write(s, c, rid, action, b))
+
+    def document_pdf(request):
+        from starlette.responses import FileResponse
+
+        from .eurydike import fulltext as ft
+        try:
+            conn = s.connect()
+        except FileNotFoundError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=503)
+        try:
+            path = ft.pdf_path(conn, s.home, Path(s.home) / getattr(s.project.storage, "archive_dir", "data/archive"), request.path_params["doc"])
+        except ft.FullTextError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+        finally:
+            conn.close()
+        return FileResponse(path, media_type="application/pdf", content_disposition_type="inline")
+
+    async def keywords_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_keywords_write(s, c, rid, b))
+
+    async def labels_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_labels_write(s, c, rid, b))
+
+    async def edit_review_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_edit_review(s, c, rid, b))
+
+    async def edit_criterion_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_edit_criterion(s, c, rid, b))
+
+
+
+    def duplicates_endpoint(request, conn):
+        from .eurydike import review as rv
+        try:
+            return eurydike_duplicates(s, conn, request.path_params["rid"], request.query_params)
+        except rv.ReviewError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=422)
+
+    async def duplicates_decide_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_duplicates_decide(s, c, rid, b))
+
+    async def duplicates_confirm_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_duplicates_confirm(s, c, rid, b))
+
     def search_files_endpoint(request, conn):
         from .eurydike import review as rv
         try:
             return eurydike_search_files(s, conn, request.path_params["rid"])
         except rv.ReviewError as exc:
             return JSONResponse({"errore": str(exc)}, status_code=404)
+
+    def to_screen_endpoint(request, conn):
+        from .eurydike import review as rv
+        try:
+            return eurydike_to_screen(s, conn, request.path_params["rid"], request.query_params)
+        except rv.ReviewError as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404)
+
+    async def screen_decide_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_screen_decide(s, c, rid, b))
+
+    async def screen_lots_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_screen_lots(s, c, rid, b))
+
+    async def screen_answers_endpoint(request: Request):
+        rid = request.path_params["rid"]
+        return await eurydike_post(request, lambda c, b: eurydike_screen_answers(s, c, rid))
 
     def review_endpoint(request, conn):
         d = eurydike_review(conn, request.path_params["rid"])
@@ -1703,6 +2259,8 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         return await simple_post(request, lambda b: set_page_look(s, b))
 
     async def texts_endpoint(request: Request):
+        if not developer_mode():
+            return JSONResponse({"errore": "i testi si modificano solo nella versione di sviluppo"}, status_code=403)
         return await simple_post(request, lambda b: {"testi": set_page_text(s, b.get("originale"), b.get("nuovo"))})
 
     routes = [
@@ -1755,6 +2313,31 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         Route("/api/eurydike/strumenti", lambda r: JSONResponse(eurydike_tools())),
         Route("/api/eurydike/revisioni/{rid}/ricerca", with_db(search_files_endpoint)),
         Route("/api/eurydike/revisioni/{rid}/importa", import_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/cartella_ricerca", search_folder_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/modifica", edit_review_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/lavagna", with_db(board_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/regole", with_db(rules_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/regole/{azione}", rules_write_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/fulltext", with_db(ft_board_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/fulltext/{azione}", ft_write_endpoint, methods=["POST"]),
+        Route("/api/eurydike/documenti/{doc}/pdf", document_pdf),
+        Route("/api/eurydike/revisioni/{rid}/bias", with_db(rb_board_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/bias/studio/{sid}", with_db(rb_study_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/bias/{azione}", rb_write_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/estrazione", with_db(ex_board_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/estrazione/studio/{sid}", with_db(ex_study_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/estrazione/{azione}", ex_write_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/lavagna/{rec}", with_db(board_record_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/parole", keywords_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/etichette", labels_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/criterio", edit_criterion_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/doppioni", with_db(duplicates_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/doppioni/decisione", duplicates_decide_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/doppioni/conferma_trovati", duplicates_confirm_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/da_schermare", with_db(to_screen_endpoint)),
+        Route("/api/eurydike/revisioni/{rid}/decisione", screen_decide_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/lotti", screen_lots_endpoint, methods=["POST"]),
+        Route("/api/eurydike/revisioni/{rid}/risposte", screen_answers_endpoint, methods=["POST"]),
         Route("/api/eurydike/revisioni/{rid}", with_db(review_endpoint)),
         Route("/api/eurydike/revisioni/{rid}/record", with_db(records_endpoint)),
         Route("/api/obiettivi", with_db(lambda r, c: objective_rows(s, c, r.query_params))),

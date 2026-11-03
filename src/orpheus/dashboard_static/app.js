@@ -4,6 +4,8 @@
 "use strict";
 
 const TOKEN = document.body.dataset.token;
+const DEV = document.body.dataset.dev === "1";      // «Modifica i testi» only in the owner's version (2026-11-03)
+if (!DEV) for (const el of document.querySelectorAll(".dev-only")) el.remove();
 const viewRoot = document.getElementById("view");
 let liveView = viewRoot;          /* a fresh box per route: a slow section never writes into the next one */
 const cache = new Map();
@@ -1950,7 +1952,7 @@ sections.sistema = async () => {
   const applied = d.migrazioni.filter((m) => m.stato === "applied").length;
   put(view, ...head("Sistema", "Dove sono i dati, se la copia del database è quella giusta, le copie di sicurezza e il budget.",
     refreshButton(() => route())), await actionBlock("manutenzione"),
-    healthBlock(d.salute), textsBlock(),
+    healthBlock(d.salute), DEV ? textsBlock() : null,
     h("div", {class: "cols"},
       h("section", {class: "block"}, h("h2", null, "Database"), h("dl", {class: "kv"},
         h("dt", null, "File"), h("dd", null, d.database.percorso),
@@ -1980,8 +1982,10 @@ sections.sistema = async () => {
 
 const drawer = document.getElementById("drawer"), scrim = document.getElementById("scrim"), dbody = document.getElementById("drawer-body");
 let opener = null;
+let drawerOnClose = null;            // e.g. the style editor puts the page back when closed without saving
 function closeDrawer() {
   drawer.hidden = true; scrim.hidden = true;
+  if (drawerOnClose) { const f = drawerOnClose; drawerOnClose = null; f(); }
   if (opener && document.contains(opener)) opener.focus();
 }
 document.getElementById("drawer-close").addEventListener("click", closeDrawer);
@@ -2084,8 +2088,8 @@ const SHARED = ["funzioni", "condivisione", "sistema"];
 const NAV = {
   orpheus: [["panoramica", "Panoramica"], ["articoli", "Articoli"], ["obiettivi", "Obiettivi e disegno"], ["riviste", "Riviste"], ["manoscritti", "Manoscritti"],
     ["sottomissioni", "Sottomissioni"], ["ricerca", "Ricerca"], ["affermazioni", "Consenso"], ["verifiche", "Verifiche"], null, ["funzioni", "Funzioni"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
-  eurydike: [["eurydike/panoramica", "Panoramica"], ["eurydike/protocollo", "Protocollo"], ["eurydike/screening", "Screening"],
-    ["eurydike/fulltext", "Full text"], ["eurydike/estrazione", "Estrazione (schede)"], ["eurydike/bias", "Rischio di bias"],
+  eurydike: [["eurydike/panoramica", "Panoramica"], ["eurydike/protocollo", "Protocollo"], ["eurydike/doppioni", "Duplicati"], ["eurydike/screening", "Screening"],
+    ["eurydike/fulltext", "Full text"], ["eurydike/estrazione", "Estrazione (schede)"], ["eurydike/bias", "Rischio di bias e qualità"],
     ["eurydike/consenso", "Consenso"], ["eurydike/meta", "Meta-analisi"], ["eurydike/esporta", "Esporta"], null,
     ["funzioni", "Funzioni"], ["condivisione", "Condivisione"], ["sistema", "Sistema"]],
 };
@@ -2127,11 +2131,11 @@ for (const b of document.querySelectorAll("[data-module-set]")) b.addEventListen
   go(b.dataset.moduleSet === "eurydike" ? "eurydike/panoramica" : "panoramica");
 });
 
-const EUR_PHASES = [["1 · Protocollo", "domanda, PICOS, criteri"], ["2 · Importazione", "RIS, PubMed, WoS, CSV; doppioni"],
+const EUR_PHASES = [["1 · Protocollo", "domanda, PICOS, criteri"], ["2 · Importazione", "RIS, PubMed, WoS, CSV; duplicati"],
   ["3 · Screening", "lotti da 25; tu + Claude"], ["4 · Full text", "includi / escludi con motivo"],
   ["5 · Estrazione", "scheda: Conferma / Correggi / Non riportato"], ["6 · Rischio di bias", "strumento per studio"],
   ["7 · Meta-analisi", "forest e funnel"], ["8 · Bozza", "Metodi e Risultati in Word"]];
-const EUR_TITLES = {protocollo: "Protocollo", screening: "Screening", fulltext: "Full text", estrazione: "Estrazione (schede)",
+const EUR_TITLES = {protocollo: "Protocollo", doppioni: "Duplicati", screening: "Screening", fulltext: "Full text", estrazione: "Estrazione (schede)",
   bias: "Rischio di bias", consenso: "Consenso", meta: "Meta-analisi", esporta: "Esporta"};
 /* ------------------------------------------------------------------ EURYDIKE · Estrazione (schede), T-051o */
 const STATE_TAG = {ai: ["da controllare", "warn"], confirmed: ["confermato", "good"], edited: ["corretto a mano", "acc"],
@@ -2288,15 +2292,15 @@ const EUR_FT = {pending: ["da decidere", "warn"], include: ["incluso", "good"], 
   not_retrieved: ["non reperito", ""]};
 const EUR_DEC = {include: ["includi", "good"], exclude: ["escludi", "crit"], maybe: ["forse", "warn"], unsure: ["incerto", "warn"]};
 const EUR_STATUS = {pending: ["da decidere", ""], partial: ["un solo revisore", "warn"], conflict: ["conflitto", "crit"],
-  agreed: ["d'accordo", "good"], resolved: ["consenso", "acc"], doppione: ["doppione", ""]};
+  agreed: ["d'accordo", "good"], resolved: ["consenso", "acc"], doppione: ["duplicato", ""]};
 const EUR_FILTERS = [["tutti", "Tutti"], ["da_decidere", "Da decidere"], ["parziali", "Un solo revisore"],
-  ["conflitti", "Conflitti"], ["inclusi", "Inclusi"], ["esclusi", "Esclusi"], ["forse", "Forse"], ["doppioni", "Doppioni"]];
+  ["conflitti", "Conflitti"], ["inclusi", "Inclusi"], ["esclusi", "Esclusi"], ["forse", "Forse"], ["doppioni", "Duplicati"]];
 const EUR_SECS = [["protocollo", "Protocollo", "domanda, PICOS, criteri, importazioni"],
-  ["screening", "Importazione e screening", "record, doppioni, decisioni"], ["fulltext", "Full text", "includi / escludi con motivo"],
+  ["screening", "Importazione e screening", "record, duplicati, decisioni"], ["fulltext", "Full text", "includi / escludi con motivo"],
   ["estrazione", "Estrazione", "scheda: Conferma / Correggi / Non riportato"], ["bias", "Rischio di bias", "strumento per studio"],
   ["consenso", "Consenso", "conflitti e accordo tu–Claude"], ["meta", "Meta-analisi", "forest e funnel"],
   ["esporta", "Esporta", "PRISMA, studi, decisioni"]];
-const PRISMA_ROWS = [["identified", "Record identificati"], ["duplicates", "Doppioni tolti"], ["screened", "Record esaminati"],
+const PRISMA_ROWS = [["identified", "Record identificati"], ["duplicates", "Duplicati tolti"], ["screened", "Record esaminati"],
   ["excluded", "Esclusi allo screening"], ["sought", "Cercati per intero"], ["not_retrieved", "Non reperiti (senza PDF)"],
   ["assessed", "Valutati per intero"], ["ft_excluded", "Esclusi al full text"], ["included", "Studi inclusi"]];
 const eurState = {rid: null, filtro: "tutti", q: "", sort: "studio", dir: 1};
@@ -2323,11 +2327,32 @@ async function eurLoad() {
 }
 function eurBar(list, cur, sub) {
   const r = cur.revisione;
-  const sel = list.revisioni.length > 1 ? h("label", {class: "fld inline"}, h("span", null, t("Revisione")),
-    h("select", {onchange: (e) => go(`eurydike/${sub}?r=${encodeURIComponent(e.target.value)}`)},
-      list.revisioni.map((x) => h("option", {value: x.id, selected: x.id === r.id ? true : null}, x.titolo)))) : null;
+  const all = list.revisioni.slice().sort((a, b) => (b.attiva - a.attiva));
+  const sel = all.length > 1 ? h("label", {class: "fld inline"}, h("span", null, t("Passa a")),
+    h("select", {"aria-label": t("Revisione su cui lavorare"), onchange: (e) => go(`eurydike/${sub}?r=${encodeURIComponent(e.target.value)}`)},
+      all.map((x) => h("option", {value: x.id, selected: x.id === r.id ? true : null}, x.attiva ? x.titolo : `${x.titolo} (${t("chiusa")})`)))) : null;
   return h("div", {class: "eur-bar"}, h("span", {class: "muted"}, t("Revisione")), " ", h("b", null, r.titolo), " ",
-    tag(t(r.tipo), "acc"), " ", tag(`${t("fase")}: ${t(r.stato)}`), sel, h("a", {class: "btn small", href: "#/eurydike/nuova"}, t("+ Nuova revisione")));
+    tag(t(r.tipo), "acc"), " ", tag(`${t("fase")}: ${t(r.stato)}`), sel,
+    h("a", {class: "btn small", href: "#/eurydike/panoramica"}, t("Tutte le revisioni")), h("a", {class: "btn small", href: "#/eurydike/nuova"}, t("+ Nuova revisione")));
+}
+/* All the reviews (2026-11-03: "Devo poter vedere tutte le revisioni attive e scegliere su quale lavorare") */
+function reviewsBlock(list, cur) {
+  const act = list.revisioni.filter((x) => x.attiva), closed = list.revisioni.filter((x) => !x.attiva);
+  const table = (rows) => h("div", {class: "table-wrap"}, h("table", null,
+    h("thead", null, h("tr", null, ["Revisione", "Fase", "Record", "Duplicati", "Studi", "Inclusi", "Ultima attività", ""].map((x, i) => h("th", {scope: "col", class: i >= 2 && i <= 5 ? "n" : null}, t(x))))),
+    h("tbody", null, rows.map((x) => h("tr", {class: x.id === cur.revisione.id ? "is-current" : null},
+      h("td", null, h("a", {href: `#/eurydike/panoramica?r=${encodeURIComponent(x.id)}`}, h("b", null, x.titolo)), h("div", {class: "muted", lang: "en"}, x.domanda || "")),
+      h("td", null, tag(t(x.stato), x.attiva ? "" : "acc"), " ", h("span", {class: "muted"}, t(x.tipo))),
+      h("td", {class: "n"}, fmtN(x.record)), h("td", {class: "n"}, fmtN(x.doppioni)), h("td", {class: "n"}, fmtN(x.studi)), h("td", {class: "n"}, fmtN(x.inclusi)),
+      h("td", null, fmtDate(x.ultima_attivita || x.creata)),
+      h("td", null, x.id === cur.revisione.id ? tag(t("aperta ora"), "good")
+        : h("a", {class: "btn small", href: `#/eurydike/panoramica?r=${encodeURIComponent(x.id)}`}, t("Lavora su questa"))))))));
+  return h("section", {class: "block", "aria-labelledby": "h-revs"},
+    h("div", {class: "block-head"}, h("h2", {id: "h-revs"}, `${t("Le revisioni attive")} (${fmtN(act.length)})`),
+      h("a", {class: "btn small", href: "#/eurydike/nuova"}, t("+ Nuova revisione"))),
+    act.length ? table(act) : h("p", {class: "empty"}, t("Nessuna revisione attiva.")),
+    closed.length ? h("details", null, h("summary", null, `${t("Revisioni chiuse")} (${fmtN(closed.length)})`), table(closed)) : null,
+    h("p", {class: "src"}, t("Si chiude o si riapre una revisione dal Protocollo (matita accanto a «La revisione», campo Fase).")));
 }
 function eurEmpty(sub) {
   const back = h("a", {class: "linklike", href: "#/panoramica"}, t("← Torna a ORPHEUS"));
@@ -2351,21 +2376,42 @@ function kappaText(k) {
 function prismaFlow(p) {
   const box = (key, label, side) => h("div", {class: `pf-box${side ? " pf-aside" : ""}`}, h("span", {class: "pf-n"}, fmtN(p[key])), h("span", null, t(label)));
   return h("div", {class: "pf", role: "group", "aria-label": t("Diagramma PRISMA 2020")},
-    h("div", {class: "pf-row"}, box("identified", "Record identificati"), box("duplicates", "Doppioni tolti", true)),
+    h("div", {class: "pf-row"}, box("identified", "Record identificati"), box("duplicates", "Duplicati tolti", true)),
     h("div", {class: "pf-row"}, box("screened", "Record esaminati"), box("excluded", "Esclusi allo screening", true)),
     h("div", {class: "pf-row"}, box("sought", "Cercati per intero"), box("not_retrieved", "Non reperiti (senza PDF)", true)),
     h("div", {class: "pf-row"}, box("assessed", "Valutati per intero"), box("ft_excluded", "Esclusi al full text", true)),
     h("div", {class: "pf-row"}, box("included", "Studi inclusi")));
+}
+/* Screening progress (2026-11-03, idea from Rayyan): the state of every record and each reviewer's progress */
+const PROG_PARTS = [["inclusi", "Inclusi", "p-in"], ["forse", "Forse", "p-may"], ["esclusi", "Esclusi", "p-out"], ["conflitti", "Conflitti", "p-conf"],
+  ["parziali", "Un solo revisore", "p-part"], ["da_decidere", "Da decidere", "p-todo"]];
+function progressBlock(cur) {
+  const a = cur.avanzamento;
+  if (!a || !a.record) return null;
+  const pct = (n) => (a.record ? (100 * n / a.record) : 0);
+  return h("section", {class: "block", "aria-labelledby": "h-prog"},
+    h("div", {class: "block-head"}, h("h2", {id: "h-prog"}, t("Avanzamento dello screening")), h("span", {class: "muted"}, `${fmtN(a.record)} ${t("record (senza duplicati)")}`)),
+    h("div", {class: "stackbar", role: "img", "aria-label": PROG_PARTS.map(([k, l]) => `${t(l)} ${a.stato[k]}`).join(", ")},
+      PROG_PARTS.filter(([k]) => a.stato[k]).map(([k, l, c]) => h("span", {class: c, style: `width:${pct(a.stato[k])}%`, title: `${t(l)}: ${fmtN(a.stato[k])}`}))),
+    h("ul", {class: "legend"}, PROG_PARTS.map(([k, l, c]) => h("li", null, h("span", {class: `sw ${c}`}), `${t(l)} `, h("b", null, fmtN(a.stato[k]))))),
+    h("div", {class: "prog-revs"}, a.revisori.map((r) => h("div", {class: "prog-rev"},
+      h("div", {class: "prog-head"}, h("b", null, r.revisore), h("span", {class: "muted"}, ` ${t(r.tipo === "human" ? "revisore" : "Claude (sessione)")}`),
+        h("span", {class: "prog-pct"}, `${r.percento}%`)),
+      h("div", {class: "stackbar thin"}, [["inclusi", "p-in"], ["forse", "p-may"], ["esclusi", "p-out"]].filter(([k]) => r[k]).map(([k, c]) => h("span", {class: c, style: `width:${pct(r[k])}%`}))),
+      h("p", {class: "muted"}, `${fmtN(r.fatti)} ${t("fatti")} · ${fmtN(r.restano)} ${t("restano")} · ${fmtN(r.inclusi)} ${t("inclusi")}, ${fmtN(r.forse)} ${t("forse")}, ${fmtN(r.esclusi)} ${t("esclusi")}`)))),
+    h("p", {class: "src"}, t("Per ogni revisore si contano solo le sue decisioni; nessuna decisione di un record è mostrata a chi non l'ha ancora deciso.")));
 }
 function eurOverview(list, cur) {
   const r = cur.revisione, p = cur.prisma;
   const kpi = (v, l, sec) => h("button", {type: "button", class: "kpi", onclick: () => go(`eurydike/${sec}`)},
     h("div", {class: "kpi-v"}, fmtN(v)), h("div", {class: "kpi-l"}, t(l)));
   return [h("a", {class: "linklike", href: "#/panoramica"}, t("← Torna a ORPHEUS")), eurBar(list, cur, "panoramica"),
+    reviewsBlock(list, cur),
     ...head(r.titolo, r.domanda),
-    h("div", {class: "kpis"}, kpi(p.identified, "record identificati", "protocollo"), kpi(p.duplicates, "doppioni", "screening"),
+    h("div", {class: "kpis"}, kpi(p.identified, "record identificati", "protocollo"), kpi(p.duplicates, "duplicati", "screening"),
       kpi(p.screened, "record esaminati", "screening"), kpi(p.sought, "studi cercati per intero", "fulltext"),
       kpi(p.included, "studi inclusi", "fulltext")),
+    progressBlock(cur),
     h("div", {class: "cols"},
       h("section", {class: "block", "aria-labelledby": "h-pf"}, h("h2", {id: "h-pf"}, t("Diagramma PRISMA 2020")),
         prismaFlow(p),
@@ -2379,48 +2425,132 @@ function eurOverview(list, cur) {
         h("p", {class: "src"}, kappaText(cur.screening.kappa)))),
     srcLine(cur)];
 }
-function eurProtocol(list, cur) {
-  const r = cur.revisione, pr = cur.protocollo;
-  const crit = (kind, letter) => {
+const EUR_KINDS = [["systematic_review", "revisione sistematica"], ["meta_analysis", "meta-analisi"], ["scoping_review", "scoping review"]];
+const EUR_PHASE_OPTS = [["protocol", "protocollo"], ["screening", "screening"], ["fulltext", "full text"], ["extraction", "estrazione"],
+  ["analysis", "analisi"], ["closed", "chiusa"]];
+/* The pencil (2026-11-03: "tutti i parametri della revisione devono poter essere modificabili ... usa simbolino matita"):
+   a block shows its values; the pencil opens the same values in a form; Salva writes (backup and audit), Annulla closes. */
+function editableBlock(id, title, viewKids, fields, rid) {
+  const box = h("section", {class: "block", "aria-labelledby": id});
+  const show = () => put(box, h("div", {class: "block-head"}, h("h2", {id}, t(title)),
+    iconBtn("matita", `Modifica: ${title}`, edit)), ...viewKids);
+  const edit = () => {
+    const f = {};
+    const msg = h("p", {class: "error", role: "alert", hidden: true});
+    const ctl = (x) => {
+      if (x.type === "select") return (f[x.k] = h("select", {name: x.k}, x.opts.map(([v, l]) => h("option", {value: v, selected: String(v) === String(x.v ?? "") ? true : null}, t(l)))));
+      if (x.type === "area") return (f[x.k] = h("textarea", {name: x.k, rows: String(x.rows || 3), lang: x.en ? "en" : null}, x.v || ""));
+      if (x.type === "check") return (f[x.k] = h("input", {type: "checkbox", name: x.k, checked: x.v ? true : null}));
+      return (f[x.k] = h("input", {type: x.type || "text", name: x.k, value: x.v ?? "", lang: x.en ? "en" : null, min: x.min}));
+    };
+    const form = h("form", {class: "edit-form", onsubmit: async (e) => {
+      e.preventDefault();
+      const body = {};
+      for (const [k, el] of Object.entries(f)) body[k] = el.type === "checkbox" ? el.checked : el.value;
+      const btn = form.querySelector("button[type=submit]"); btn.disabled = true; msg.hidden = true;
+      try { await postJson(`/api/eurydike/revisioni/${encodeURIComponent(rid)}/modifica`, body); clearCache(); route(); }
+      catch (err) { msg.hidden = false; msg.textContent = err.message; btn.disabled = false; }
+    }}, h("div", {class: "form-grid"}, fields.map((x) => field(t(x.l), ctl(x)))), msg,
+      h("div", {class: "action-row"}, h("button", {type: "submit", class: "btn primary"}, t("Salva")),
+        h("button", {type: "button", class: "btn", onclick: show}, t("Annulla"))));
+    put(box, h("div", {class: "block-head"}, h("h2", {id}, t(title))), form);
+    const first = form.querySelector("input,textarea,select"); if (first) first.focus();
+  };
+  show();
+  return box;
+}
+function criteriaBlock(cur) {
+  const rid = encodeURIComponent(cur.revisione.id), pr = cur.protocollo;
+  const box = h("section", {class: "block", "aria-labelledby": "h-crit"});
+  const send = async (body, msg) => {
+    try { await postJson(`/api/eurydike/revisioni/${rid}/criterio`, body); clearCache(); route(); }
+    catch (err) { msg.hidden = false; msg.textContent = err.message; }
+  };
+  const editor = (value, onsave, oncancel) => {
+    const ta = h("textarea", {rows: "2", lang: "en"}, value || "");
+    const msg = h("p", {class: "error", role: "alert", hidden: true});
+    const wrap = h("div", {class: "edit-form"}, ta, msg, h("div", {class: "action-row"},
+      h("button", {type: "button", class: "btn primary small", onclick: () => onsave(ta.value, msg)}, t("Salva")),
+      h("button", {type: "button", class: "btn small", onclick: oncancel}, t("Annulla"))));
+    setTimeout(() => ta.focus(), 0);
+    return wrap;
+  };
+  const list = (kind, letter, label) => {
     const now = pr.criteri.filter((c) => c.tipo === kind && !c.sostituito_da);
     const old = pr.criteri.filter((c) => c.tipo === kind && c.sostituito_da);
-    return [now.length ? h("ol", {class: "crit-list"}, now.map((c) => h("li", null, h("b", null, `${letter}${c.ord}`), " ", h("span", {lang: "en"}, c.testo),
-      c.regola ? h("code", null, ` ${JSON.stringify(c.regola)}`) : null))) : h("p", {class: "empty"}, t("Nessuno.")),
-      old.length ? h("details", null, h("summary", null, `${t("Sostituiti")} (${old.length})`),
-        h("ul", {class: "notes"}, old.map((c) => h("li", null, h("s", null, `${letter}${c.ord} ${c.testo}`), " ", h("span", {class: "muted"}, fmtDate(c.creato, false)))))) : null];
+    const ol = h("ol", {class: "crit-list"});
+    for (const c of now) {
+      const li = h("li");
+      const view = () => put(li, h("b", {class: "crit-n"}, `${letter}${c.ord}`), h("span", {class: "crit-t", lang: "en"}, c.testo,
+        c.regola ? h("code", null, ` ${JSON.stringify(c.regola)}`) : null),
+        h("span", {class: "crit-actions"}, iconBtn("matita", "Modifica il criterio", () => put(li, h("b", {class: "crit-n"}, `${letter}${c.ord}`),
+          editor(c.testo, (v, msg) => send({azione: "modifica", id: c.id, testo: v}, msg), view))),
+        iconBtn("cestino", "Ritira il criterio", () => {
+          if (confirm(t("Ritirare questo criterio? Resta nella storia; le decisioni già prese con questo criterio restano."))) send({azione: "ritira", id: c.id}, msg0);
+        })));
+      view();
+      ol.append(li);
+    }
+    const msg0 = h("p", {class: "error", role: "alert", hidden: true});
+    const add = h("div");
+    const addBtn = () => put(add, h("button", {type: "button", class: "btn small", onclick: () => put(add,
+      editor("", (v, msg) => send({azione: "aggiungi", tipo: kind, testo: v}, msg), addBtn))}, `+ ${t("Aggiungi un criterio")}`));
+    addBtn();
+    return [h("h3", {class: "crit-h"}, t(label)), now.length ? ol : h("p", {class: "empty"}, t("Nessuno.")), msg0, add,
+      old.length ? h("details", null, h("summary", null, `${t("Sostituiti o ritirati")} (${old.length})`),
+        h("ul", {class: "notes"}, old.map((c) => h("li", null, h("s", null, `${letter}${c.ord} ${c.testo}`), " ",
+          tag(t(c.ritirato ? "ritirato" : "sostituito"), ""), " ", h("span", {class: "muted"}, fmtDate(c.creato, false)))))) : null];
   };
-  const pico = Object.entries(r.pico || {});
-  return [eurBar(list, cur, "protocollo"), ...head(t("Protocollo"), t("Domanda, PICOS e criteri: un criterio non si cambia, uno nuovo lo sostituisce e il vecchio resta nella storia.")),
-    searchBlock(cur),
+  put(box, h("div", {class: "block-head"}, h("h2", {id: "h-crit"}, t("Criteri di selezione"))),
+    h("div", {class: "crit-cols"}, h("div", {class: "crit-col"}, ...list("inclusion", "I", "Inclusione")),
+      h("div", {class: "crit-col"}, ...list("exclusion", "E", "Esclusione"))),
+    pr.criteri.some((c) => c.tipo === "prefilter") ? h("details", null, h("summary", null, t("Prefiltri")),
+      h("ul", {class: "notes"}, pr.criteri.filter((c) => c.tipo === "prefilter" && !c.sostituito_da).map((c) => h("li", null, `P${c.ord} `, h("span", {lang: "en"}, c.testo))))) : null,
+    null);
+  return box;
+}
+async function eurProtocol(list, cur) {
+  const r = cur.revisione, pr = cur.protocollo, rid = r.id;
+  let tools = {rob: [], qualita: []};
+  try { tools = await get("/api/eurydike/strumenti"); } catch (e) { /* the forms work without the tools */ }
+  const toolName = (arr, id) => (arr.find((x) => x.id === id) || {}).nome || id || "—";
+  const toolOpts = (arr) => [["", "—"], ...arr.map((x) => [x.id, x.nome || x.id])];
+  const pico = r.pico || {};
+  const kv = (pairs) => h("dl", {class: "kv"}, pairs.map(([k, v, en]) => [h("dt", null, t(k)), h("dd", {lang: en ? "en" : null}, v === null || v === undefined || v === "" ? "—" : String(v))]));
+  return [eurBar(list, cur, "protocollo"), ...head(t("Protocollo"), t("Ogni parametro si cambia con la matita: il valore vecchio resta nella storia (audit). I criteri cambiati restano con le decisioni già prese.")),
     h("div", {class: "cols"},
-      h("section", {class: "block"}, h("h2", null, t("Domanda")), h("p", {lang: "en"}, r.domanda),
-        h("dl", {class: "kv"}, pico.map(([k, v]) => [h("dt", null, k), h("dd", {lang: "en"}, String(v))]),
-          h("dt", null, t("Registrazione")), h("dd", null, r.registrazione || "—"),
-          h("dt", null, t("Revisori allo screening")), h("dd", null, fmtN(r.revisori_screening)),
-          h("dt", null, t("Cieco")), h("dd", null, `${r.cieco ? t("sì") : t("no")} (${t("revisori")}), ${r.cieco_ai ? t("sì") : t("no")} (Claude)`),
-          h("dt", null, t("Cartella")), h("dd", null, h("code", null, r.cartella))),
-        r.strategia ? h("details", null, h("summary", null, t("Strategia di ricerca")), h("pre", {class: "pre", lang: "en"}, r.strategia)) : null),
-      h("section", {class: "block"}, h("h2", null, t("Criteri di inclusione")), crit("inclusion", "I"),
-        h("h2", null, t("Criteri di esclusione")), crit("exclusion", "E"),
-        pr.criteri.some((c) => c.tipo === "prefilter") ? [h("h2", null, t("Prefiltri")), crit("prefilter", "P")] : null)),
+      editableBlock("h-rev", "La revisione", [kv([["Titolo", r.titolo, true], ["Tipo", t(r.tipo)], ["Fase", t(r.stato)], ["Cartella", r.cartella]]),
+        null],
+        [{k: "titolo", l: "Titolo", v: r.titolo, en: true}, {k: "tipo", l: "Tipo", type: "select", opts: EUR_KINDS, v: r.tipo_codice},
+          {k: "fase", l: "Fase", type: "select", opts: EUR_PHASE_OPTS, v: r.fase}], rid),
+      editableBlock("h-q", "Domanda e PICOS", [h("p", {lang: "en"}, r.domanda), kv(["P", "I", "C", "O", "S"].map((k) => [k, pico[k], true]))],
+        [{k: "domanda", l: "Domanda di ricerca (in inglese)", type: "area", v: r.domanda, en: true},
+          ...["P", "I", "C", "O", "S"].map((k) => ({k, l: k, v: pico[k] || "", en: true}))], rid)),
+    criteriaBlock(cur),
+    h("div", {class: "cols"},
+      editableBlock("h-set", "Ricerca, revisori e strumenti", [kv([["Registrazione", r.registrazione], ["Revisori allo screening", r.revisori_screening],
+          ["Cieco tra i revisori", r.cieco ? t("sì") : t("no")], ["Claude in cieco", r.cieco_ai ? t("sì") : t("no")],
+          ["Rischio di bias predefinito", toolName(tools.rob, r.rob_predefinito)], ["Qualità predefinita", toolName(tools.qualita, r.qualita_predefinita)]]),
+        r.strategia ? h("details", null, h("summary", null, t("Strategia di ricerca")), h("pre", {class: "pre", lang: "en"}, r.strategia)) : h("p", {class: "muted"}, t("Strategia di ricerca: —"))],
+        [{k: "registrazione", l: "Registrazione (PROSPERO, OSF)", v: r.registrazione || ""},
+          {k: "revisori_screening", l: "Revisori allo screening", type: "number", min: "1", v: r.revisori_screening},
+          {k: "cieco", l: "Cieco tra i revisori", type: "check", v: r.cieco}, {k: "cieco_ai", l: "Claude in cieco", type: "check", v: r.cieco_ai},
+          {k: "rob", l: "Rischio di bias predefinito", type: "select", opts: toolOpts(tools.rob), v: r.rob_predefinito || ""},
+          {k: "qualita", l: "Qualità predefinita", type: "select", opts: toolOpts(tools.qualita), v: r.qualita_predefinita || ""},
+          {k: "strategia", l: "Strategia di ricerca (le stringhe di ogni banca dati)", type: "area", rows: 6, v: r.strategia || "", en: true}], rid),
+      h("section", {class: "block"}, h("h2", null, t("Revisori")), h("ul", {class: "notes"}, pr.revisori.map((v) => h("li", null, h("b", null, v.nome), " ", tag(t(v.tipo)), v.modello ? h("span", {class: "muted"}, ` ${v.modello}`) : null))))),
+    h("h2", {class: "group-h"}, t("Ricerca e importazione")),
+    searchBlock(cur), dupCheckBlock(cur),
     h("section", {class: "block"}, h("h2", null, t("Importazioni")),
       pr.importazioni.length ? h("div", {class: "table-wrap"}, h("table", null,
-        h("thead", null, h("tr", null, ["File", "Banca dati", "Formato", "Cercato il", "Record", "Doppioni", "Importato il"].map((x, i) => h("th", {scope: "col", class: i > 3 && i < 6 ? "n" : null}, t(x))))),
+        h("thead", null, h("tr", null, ["File", "Banca dati", "Formato", "Cercato il", "Record", "Duplicati", "Importato il"].map((x, i) => h("th", {scope: "col", class: i > 3 && i < 6 ? "n" : null}, t(x))))),
         h("tbody", null, pr.importazioni.map((i) => h("tr", null, h("td", null, i.fonte_file), h("td", null, i.banca_dati), h("td", null, i.formato.toUpperCase()),
           h("td", null, i.cercato_il || "—"), h("td", {class: "n"}, fmtN(i.record)), h("td", {class: "n"}, fmtN(i.doppioni)), h("td", null, fmtDate(i.importato_il))))))) 
         : h("p", {class: "empty"}, t("Nessuna importazione."))),
-    h("div", {class: "cols"},
-      h("section", {class: "block"}, h("h2", null, t("Revisori")), h("ul", {class: "notes"}, pr.revisori.map((v) => h("li", null, h("b", null, v.nome), " ", tag(t(v.tipo)), v.modello ? h("span", {class: "muted"}, ` ${v.modello}`) : null)))),
-      h("section", {class: "block"}, h("h2", null, t("Registro delle deviazioni e delle note")),
+    h("section", {class: "block"}, h("h2", null, t("Registro delle deviazioni e delle note")),
         pr.registro.length ? h("ul", {class: "notes"}, pr.registro.map((g) => h("li", null, tag(t(g.tipo)), " ", h("b", null, g.titolo), g.perche ? ` — ${g.perche}` : "",
-          h("span", {class: "muted"}, ` (${g.revisore}, ${fmtDate(g.data, false)}${g.record !== null ? `, ${fmtN(g.record)} record` : ""})`)))) : h("p", {class: "empty"}, t("Nessuna nota.")))),
+          h("span", {class: "muted"}, ` (${g.revisore}, ${fmtDate(g.data, false)}${g.record !== null ? `, ${fmtN(g.record)} record` : ""})`)))) : h("p", {class: "empty"}, t("Nessuna nota."))),
     srcLine(pr)];
-}
-function decisionTags(r) {
-  return h("div", {class: "checks"}, r.decisioni.length ? r.decisioni.map((d) => {
-    const [txt, k] = EUR_DEC[d.decisione] || [d.decisione, ""];
-    return h("span", {class: "dec", title: d.motivo || null}, h("span", {class: "muted"}, `${d.revisore}: `), tag(t(txt), k), d.criterio ? h("span", {class: "muted"}, ` E${d.criterio}`) : null);
-  }) : h("span", {class: "muted"}, "—"));
 }
 function recordCell(r) {
   return h("div", null, h("b", {lang: "en"}, r.titolo), h("div", {class: "muted"}, [r.autori ? r.autori.split(";")[0] + (r.autori.includes(";") ? " et al." : "") : null, r.anno, r.rivista, shortDoi(r.doi)].filter(Boolean).join(" · ")));
@@ -2433,32 +2563,303 @@ function finalTag(r) {
   }
   return tag(t(txt), k);
 }
-async function eurScreening(list, cur) {
-  const sc = cur.screening;
-  const holder = h("div"), more = h("div");
-  let shown = [];
-  const load = async (from) => {
-    const qs = new URLSearchParams({filtro: eurState.filtro, q: eurState.q, da: String(from), quanti: "100"});
-    const d = await api(`/api/eurydike/revisioni/${encodeURIComponent(cur.revisione.id)}/record?${qs}`);
-    shown = from ? shown.concat(d.righe) : d.righe;
-    put(holder, shown.length ? h("div", {class: "table-wrap"}, h("table", null,
-      h("thead", null, h("tr", null, h("th", {scope: "col"}, t("Record")), h("th", {scope: "col"}, t("Decisioni")), h("th", {scope: "col"}, t("Decisione finale")))),
-      h("tbody", null, shown.map((r) => h("tr", null, h("td", null, recordCell(r)), h("td", null, decisionTags(r)), h("td", null, r.doppione_di ? tag(t("doppione")) : finalTag(r))))))) 
-      : h("p", {class: "empty"}, t("Nessun record con questo filtro.")));
-    put(more, h("p", {class: "muted"}, `${fmtN(shown.length)} ${t("di")} ${fmtN(d.totale)} ${t("record")}`),
-      shown.length < d.totale ? h("button", {type: "button", class: "btn", onclick: () => load(shown.length)}, t("Mostra altri 100")) : null);
+/* T-051e: the user screens one record at a time (keys I / E / M, numbers for the criterion), blind: Claude's decision
+   is never shown before the user's own. Lots of 25 for Claude and his answers from two buttons. */
+/* Claude as second reviewer: lots of 25 records (blind) and his answers (T-051e) */
+function claudeLotsBlock(cur, st, onChange) {
+  const rid = encodeURIComponent(cur.revisione.id);
+  const msg = h("span", {role: "status", class: "muted"});
+  const n = h("input", {type: "number", min: "1", max: "40", value: "4", "aria-label": t("Lotti da preparare"), class: "num-in"});
+  const run = (path, body, text) => async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { const r = await postJson(`/api/eurydike/revisioni/${rid}/${path}`, body()); clearCache(); put(msg, tag(text(r), "good")); if (onChange) onChange(); }
+    catch (err) { put(msg, h("span", {class: "error"}, err.message)); }
+    b.disabled = false;
   };
-  const chips = h("div", {class: "checks", role: "group", "aria-label": t("Filtro")}, EUR_FILTERS.map(([k, l]) =>
-    h("button", {type: "button", class: "chip", "aria-pressed": String(eurState.filtro === k), onclick: (e) => {
-      eurState.filtro = k; for (const b of e.currentTarget.parentNode.children) b.setAttribute("aria-pressed", String(b === e.currentTarget)); load(0);
-    }}, t(l), h("span", {class: "muted"}, ` ${fmtN(sc.conteggi[k])}`))));
-  const search = h("input", {type: "search", placeholder: t("Cerca nel titolo, autori, rivista, DOI"), value: eurState.q,
-    "aria-label": t("Cerca nei record"), oninput: debounce((e) => { eurState.q = e.target.value; load(0); }, 300)});
-  await load(0);
-  return [eurBar(list, cur, "screening"), ...head(t("Screening"), t("Titolo e abstract: la decisione finale è calcolata dalle decisioni dei revisori (due d'accordo, oppure il consenso). Due \"forse\" sono un conflitto: decide il full text.")),
-    h("p", {class: "notice"}, t("Sola lettura: le decisioni si scriveranno qui con la fase di screening (T-051e).")),
-    h("div", {class: "toolbar"}, chips, h("div", {class: "search"}, search)),
-    holder, more, h("p", {class: "src"}, kappaText(sc.kappa)), srcLine(sc)];
+  return h("section", {class: "block scr-claude", "aria-labelledby": "h-claude"},
+    h("div", {class: "block-head"}, h("h2", {id: "h-claude"}, t("Claude, secondo revisore (in cieco)")),
+      h("span", {class: "muted"}, `${fmtN(st.decisi_da_claude)} ${t("di")} ${fmtN(st.record)} ${t("record decisi")} · ${fmtN(st.lotti_aperti)} ${t("lotti aperti")} · ${fmtN(st.da_mettere_in_lotti)} ${t("da mettere in lotti")}`)),
+    h("div", {class: "action-row"}, h("label", {class: "fld inline"}, h("span", null, t("Lotti da 25")), n),
+      h("button", {type: "button", class: "btn", onclick: run("lotti", () => ({quanti: Number(n.value) || 4}),
+        (r) => `${t("Lotti aperti")}: ${fmtN(r.aperti.length)} (${t("nuovi")} ${fmtN(r.nuovi)}). ${t("Chiedi a Claude di schermarli.")}`)}, t("Prepara i lotti per Claude")),
+      h("button", {type: "button", class: "btn", onclick: run("risposte", () => ({}),
+        (r) => `${t("Risposte di Claude")}: ${fmtN(r.accettate)} ${t("accettate")}, ${fmtN(r.rifiutate)} ${t("rifiutate")}`)}, t("Leggi le risposte di Claude")), msg));
+}
+/* keywords highlighted in a text (green = for including, red = for excluding) */
+function highlight(text, kw) {
+  const words = [...(kw.include || []).map((x) => [x.parola, "kw-in"]), ...(kw.exclude || []).map((x) => [x.parola, "kw-out"])]
+    .filter(([w]) => w && w.trim()).sort((a, b) => b[0].length - a[0].length);
+  if (!text || !words.length) return [text || ""];
+  const esc = (w) => w.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?<![0-9a-z])(${words.map(([w]) => esc(w)).join("|")})`, "gi");
+  const kindOf = (m) => (words.find(([w]) => m.toLowerCase().startsWith(w.trim().toLowerCase())) || [null, "kw-in"])[1];
+  const out = []; let last = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(h("mark", {class: kindOf(m[0])}, m[0]));
+    last = m.index + m[0].length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
+const SCR_DEC = [["da_decidere", "Da decidere"], ["decisi", "Decisi da me"], ["tutti", "Tutti"], ["inclusi", "Inclusi"], ["forse", "Forse"],
+  ["esclusi", "Esclusi"], ["conflitti", "Conflitti"], ["proposte", "Proposti da regole"]];
+const SCR_NUM = [["qualsiasi", "Qualsiasi"], ["nessuna", "Nessuna"], ["una", "Una"], ["due_o_piu", "Due o più"]];
+const scrState = {filtro: "da_decidere", q: "", parola: "", etichetta: "", motivo: "", numero: "qualsiasi", sel: null};
+function decDot(d) {
+  const [txt, k] = EUR_DEC[d] || ["da decidere", ""];
+  return h("span", {class: `ddot ${k || "none"}`, title: t(txt), "aria-label": t(txt)}, d === "include" ? "✓" : d === "exclude" ? "✕" : d === "maybe" ? "?" : "");
+}
+/* EURYDIKE E4 · bulk rules (0.70.0, decisions of the user of 2026-11-03): words, year, publication type; a rule only
+   PROPOSES «exclude» with a criterion, the reviewer confirms or rejects record by record; proposed records are not sent
+   to Claude unless a reviewer rejected the proposal. */
+function ruleProposals(d, rid, me, after) {
+  const ps = d.regole || [];
+  if (!ps.length) return null;
+  const msg = h("span", {role: "status"});
+  const send = (p, risposta) => async (e) => {
+    e.currentTarget.disabled = true;
+    try { await postJson(`/api/eurydike/revisioni/${rid}/regole/risposta`, {regola: p.regola, record: d.id, risposta, revisore: me || null}); await after(); }
+    catch (err) { put(msg, h("span", {class: "error"}, err.message)); }
+  };
+  const STATE = {proposta: ["da confermare", "warn"], confermata: ["confermata", "good"], rifiutata: ["rifiutata", ""], "già decisa": ["già decisa da te", ""]};
+  return h("div", {class: "rule-prop"}, h("span", {class: "set-label"}, t("Proposta delle regole")),
+    ps.map((p) => h("div", {class: "rule-row"},
+      h("span", null, h("b", null, t("Escludi")), " · ", p.criterio ? h("span", {lang: "en"}, `E${p.criterio.ord} ${p.criterio.testo}`) : null,
+        h("span", {class: "muted"}, ` — ${p.descrizione}`), " ", tag(t((STATE[p.stato] || [p.stato])[0]), (STATE[p.stato] || [])[1])),
+      h("span", {class: "action-row"},
+        p.stato !== "confermata" ? h("button", {type: "button", class: "btn small dec-out", onclick: send(p, "conferma")}, t("Conferma l'esclusione")) : null,
+        p.stato !== "rifiutata" ? h("button", {type: "button", class: "btn small", onclick: send(p, "rifiuta")}, t("Rifiuta")) : null))), msg);
+}
+const RULE_KINDS = [["words", "Parole nel titolo o nell'abstract"], ["year", "Anno di pubblicazione"], ["pubtype", "Tipo di pubblicazione"]];
+async function rulesBlock(cur, me, onChange) {
+  const rid = encodeURIComponent(cur.revisione.id);
+  const box = h("details", {class: "block rules-block"});
+  let open = false;
+  try { open = localStorage.getItem("eurydike-regole-aperte") === "1"; } catch (e) { open = false; }
+  if (open) box.setAttribute("open", "");
+  box.addEventListener("toggle", () => { try { localStorage.setItem("eurydike-regole-aperte", box.open ? "1" : "0"); } catch (e) { /* no storage */ } });
+  const form = {tipo: "words", tipi: new Set()};
+  const draw = async () => {
+    const d = await api(`/api/eurydike/revisioni/${rid}/regole${me ? "?revisore=" + encodeURIComponent(me) : ""}`);
+    const msg = h("div", {role: "status"});
+    const prev = h("div", {class: "rule-prev", "aria-live": "polite"});
+    const kind = h("select", {"aria-label": t("Tipo di regola")}, RULE_KINDS.map(([k, l]) => h("option", {value: k, selected: form.tipo === k ? "" : null}, t(l))));
+    const crit = h("select", {"aria-label": t("Criterio di esclusione")}, h("option", {value: ""}, t("— criterio di esclusione —")),
+      d.criteri.map((c) => h("option", {value: c.id}, `E${c.ordine} ${c.testo.slice(0, 80)}`)));
+    const words = h("textarea", {rows: "2", lang: "en", placeholder: "systematic review, meta-analysis, protocol", "aria-label": t("Parole o frasi (separate da virgola)")});
+    const where = h("select", {"aria-label": t("Dove")}, h("option", {value: "titolo"}, t("solo nel titolo")), h("option", {value: "titolo_abstract"}, t("nel titolo o nell'abstract")));
+    const before = h("input", {type: "number", min: "1800", max: "2100", placeholder: "2000", class: "num-in", "aria-label": t("Prima del")});
+    const after = h("input", {type: "number", min: "1800", max: "2100", placeholder: "2026", class: "num-in", "aria-label": t("Dopo il")});
+    const why = h("input", {type: "text", placeholder: t("Perché (facoltativo, va nel registro)"), "aria-label": t("Perché")});
+    const params = () => ({tipo: kind.value, criterio: crit.value, parole: words.value, dove: where.value, prima_di: before.value, dopo: after.value,
+      tipi: [...form.tipi].join(";"), motivo: why.value, revisore: me || null});
+    const fields = h("div", {class: "rule-fields"});
+    const drawFields = () => {
+      form.tipo = kind.value; put(prev);
+      if (kind.value === "words") put(fields, h("label", {class: "fld"}, h("span", null, t("Parole o frasi (separate da virgola)")), words), h("label", {class: "fld"}, h("span", null, t("Dove")), where));
+      else if (kind.value === "year") put(fields, h("label", {class: "fld"}, h("span", null, t("Prima del")), before), h("label", {class: "fld"}, h("span", null, t("Dopo il")), after));
+      else put(fields, d.non_letti ? h("p", {class: "notice"}, `${fmtN(d.non_letti)} ${t("record senza tipo di pubblicazione (importati prima della 0.70.0).")} `,
+          h("button", {type: "button", class: "btn small", onclick: async (e) => { e.currentTarget.disabled = true;
+            try { const o = await postJson(`/api/eurydike/revisioni/${rid}/regole/tipi`, {}); put(msg, tag(`${t("Tipi letti")}: ${fmtN(o.riempiti)}${o.file_mancanti.length ? " · " + t("file non trovati") + ": " + o.file_mancanti.join(", ") : ""}`, o.file_mancanti.length ? "warn" : "good")); clearCache(); await draw(); }
+            catch (err) { put(msg, h("span", {class: "error"}, err.message)); } }}, t("Leggi i tipi dai file di ricerca"))) : null,
+        d.tipi.length ? h("div", {class: "checks"}, d.tipi.map((x) => h("button", {type: "button", class: "chip", "aria-pressed": String(form.tipi.has(x.tipo)),
+          onclick: (e) => { if (form.tipi.has(x.tipo)) form.tipi.delete(x.tipo); else form.tipi.add(x.tipo); e.currentTarget.setAttribute("aria-pressed", String(form.tipi.has(x.tipo))); put(prev); }},
+          x.tipo, h("span", {class: "muted"}, ` ${fmtN(x.n)}`)))) : h("p", {class: "muted"}, t("Nessun tipo di pubblicazione letto.")));
+    };
+    kind.addEventListener("change", drawFields); drawFields();
+    const preview = async () => {
+      const p = params();
+      const q = new URLSearchParams({tipo: p.tipo, parole: p.parole, dove: p.dove, prima_di: p.prima_di || "", dopo: p.dopo || "", tipi: p.tipi});
+      try {
+        const o = await api(`/api/eurydike/revisioni/${rid}/regole?${q}`);
+        put(prev, h("p", null, h("b", null, `${fmtN(o.trovati)} ${t("record")}`), ` — ${o.descrizione}`),
+          o.esempi.length ? h("ul", {class: "notes"}, o.esempi.map((x) => h("li", {lang: "en"}, x.titolo, x.anno ? h("span", {class: "muted"}, ` · ${x.anno}`) : null))) : null);
+      } catch (err) { put(prev, h("span", {class: "error"}, err.message)); }
+    };
+    const add = async (e) => {
+      if (!crit.value) { put(msg, h("span", {class: "error"}, t("Scegli il criterio di esclusione."))); return; }
+      e.currentTarget.disabled = true;
+      try { const o = await postJson(`/api/eurydike/revisioni/${rid}/regole/aggiungi`, params()); put(msg, tag(`${t("Regola aggiunta")}: ${fmtN(o.trovati)} ${t("record proposti")}`, "good")); clearCache(); await draw(); if (onChange) onChange(); }
+      catch (err) { put(msg, h("span", {class: "error"}, err.message)); e.currentTarget.disabled = false; }
+    };
+    const remove = (r) => async () => {
+      try { await postJson(`/api/eurydike/revisioni/${rid}/regole/togli`, {regola: r.id}); clearCache(); await draw(); if (onChange) onChange(); } catch (err) { alert(err.message); }
+    };
+    const show = () => { scrState.filtro = "proposte"; if (onChange) onChange(); };
+    const totOpen = d.regole.reduce((a, r) => a + r.da_rispondere, 0);
+    put(box,
+      h("summary", {class: "block-head"}, h("h2", null, t("Regole di massa")),
+        h("span", {class: "muted"}, `${plural(d.regole.length, "regola", "regole")} · ${fmtN(totOpen)} ${t("proposte da confermare")} · ${fmtN(d.fuori_da_claude)} ${t("record non inviati a Claude")}`)),
+      h("p", {class: "muted"}, t("Una regola propone «Escludi» con un criterio: non decide. Confermi o rifiuti record per record (filtro «Proposti da regole»). I record proposti non vanno nei lotti di Claude, salvo se rifiuti la proposta.")),
+      d.regole.length ? h("table", {class: "tbl rules-tbl"}, h("thead", null, h("tr", null, ["Regola", "Criterio", "Trovati", "Da confermare", "Confermati", "Rifiutati", ""].map((x) => h("th", {scope: "col"}, t(x))))),
+        h("tbody", null, d.regole.map((r) => h("tr", null, h("td", null, r.descrizione), h("td", {lang: "en"}, r.criterio ? `E${r.criterio.ord} ${r.criterio.testo}` : "—"),
+          h("td", {class: "num"}, fmtN(r.trovati)), h("td", {class: "num"}, r.da_rispondere ? h("button", {type: "button", class: "linklike", onclick: show}, fmtN(r.da_rispondere)) : "0"),
+          h("td", {class: "num"}, fmtN(r.confermati)), h("td", {class: "num"}, fmtN(r.rifiutati)),
+          h("td", null, h("button", {type: "button", class: "btn small", onclick: remove(r), title: t("La regola resta nel registro")}, t("Togli")))))))
+        : h("p", {class: "empty"}, t("Nessuna regola.")),
+      h("div", {class: "rule-new"}, h("h3", null, t("Nuova regola")),
+        h("div", {class: "rule-grid"}, h("label", {class: "fld"}, h("span", null, t("Tipo di regola")), kind), fields,
+          h("label", {class: "fld"}, h("span", null, t("Criterio di esclusione")), crit), h("label", {class: "fld"}, h("span", null, t("Perché")), why)),
+        h("div", {class: "action-row"}, h("button", {type: "button", class: "btn", onclick: preview}, t("Anteprima")),
+          h("button", {type: "button", class: "btn primary", onclick: add}, t("Aggiungi la regola"))), prev, msg));
+  };
+  await draw();
+  return box;
+}
+/* Screening (2026-11-03, ideas from Rayyan): list of records on the left (any record can be opened to change a
+   decision), the record in the middle with the keywords marked, filters with counts on the right. */
+async function eurScreening(list, cur) {
+  const rid = encodeURIComponent(cur.revisione.id);
+  let me = "";
+  try { me = localStorage.getItem("eurydike-revisore") || ""; } catch (e) { me = ""; }
+  const rq = me ? `revisore=${encodeURIComponent(me)}` : "";
+  const st = (await api(`/api/eurydike/revisioni/${rid}/da_schermare${rq ? "?" + rq : ""}`)).stato;
+  const listBox = h("section", {class: "block scr-list", "aria-labelledby": "h-rec"});
+  const detail = h("section", {class: "block scr-detail", "aria-live": "polite", "aria-labelledby": "h-det"});
+  const side = h("aside", {class: "scr-side", "aria-label": t("Filtri")});
+  let data = null, rows = [], crit = null;
+  const qs = (extra) => new URLSearchParams({filtro: scrState.filtro, q: scrState.q, parola: scrState.parola, etichetta: scrState.etichetta,
+    motivo: scrState.motivo, numero: scrState.numero, ...(me ? {revisore: me} : {}), ...(extra || {})});
+  const load = async (keepSel) => {
+    data = await api(`/api/eurydike/revisioni/${rid}/lavagna?${qs({da: "0", quanti: String(Math.max(50, rows.length || 50))})}`);
+    rows = data.righe;
+    if (!keepSel || !rows.some((r) => r.id === scrState.sel)) scrState.sel = rows.length ? rows[0].id : null;
+    drawList(); drawSide();
+    if (scrState.sel) openRecord(scrState.sel); else put(detail, h("h2", {id: "h-det"}, t("Record")), h("p", {class: "empty"}, t("Nessun record con questi filtri.")));
+  };
+  const more = async () => {
+    const d = await api(`/api/eurydike/revisioni/${rid}/lavagna?${qs({da: String(rows.length), quanti: "50"})}`);
+    rows = rows.concat(d.righe); drawList();
+  };
+  const select = (id) => { scrState.sel = id; drawList(); openRecord(id); };
+  const step = (k) => {
+    const i = rows.findIndex((r) => r.id === scrState.sel);
+    const j = i + k;
+    if (j >= 0 && j < rows.length) select(rows[j].id);
+  };
+  function drawList() {
+    const c = data.conteggi.decisione;
+    const search = h("input", {type: "search", value: scrState.q, placeholder: t("Cerca nel titolo, autori, rivista"), "aria-label": t("Cerca nei record"),
+      oninput: debounce((e) => { scrState.q = e.target.value; load(); }, 300)});
+    const active = [["parola", "Parola"], ["etichetta", "Etichetta"], ["motivo", "Motivo"], ["numero", "Decisioni"]]
+      .filter(([k]) => scrState[k] && scrState[k] !== "qualsiasi").map(([k, l]) => h("button", {type: "button", class: "chip active-f", onclick: () => { scrState[k] = k === "numero" ? "qualsiasi" : ""; load(); }},
+        `${t(l)}: ${k === "motivo" ? "E" + ((data.conteggi.motivi.find((m) => m.id === scrState.motivo) || {}).ord || "?") : k === "numero" ? t((SCR_NUM.find((x) => x[0] === scrState.numero) || [0, ""])[1]) : scrState[k]}`, h("span", {"aria-hidden": "true"}, " ×")));
+    const ol = h("ol", {class: "scr-items"}, rows.map((r, i) => h("li", null, h("button", {type: "button", class: "scr-item", "aria-current": r.id === scrState.sel ? "true" : null,
+      onclick: () => select(r.id)}, h("span", {class: "scr-n"}, String(i + 1)), h("span", {class: "scr-t", lang: "en"}, r.titolo),
+      h("span", {class: "scr-meta"}, decDot(r.mia), r.finale && r.finale !== "da_decidere" ? h("span", {class: "muted"}, ` ${t("finale")}: ${t({inclusi: "incluso", esclusi: "escluso", forse: "forse", conflitti: "conflitto", parziali: "un solo revisore"}[r.finale] || r.finale)}`) : null,
+        r.anno ? h("span", {class: "muted"}, ` · ${r.anno}`) : null, r.regola ? tag(t("regola"), "warn") : null, ...r.etichette.map((x) => tag(x, "acc")))))));
+    put(listBox, h("div", {class: "block-head"}, h("h2", {id: "h-rec"}, t("Record")), h("span", {class: "muted"}, `${fmtN(rows.length)} ${t("di")} ${fmtN(data.totale)}`)),
+      h("div", {class: "checks", role: "group", "aria-label": t("Decisione")}, SCR_DEC.map(([k, l]) => h("button", {type: "button", class: "chip", "aria-pressed": String(scrState.filtro === k),
+        onclick: () => { scrState.filtro = k; load(); }}, t(l), h("span", {class: "muted"}, ` ${fmtN(c[k] || 0)}`)))),
+      h("div", {class: "scr-search"}, search), active.length ? h("div", {class: "checks"}, active) : null,
+      rows.length ? ol : h("p", {class: "empty"}, t("Nessun record con questi filtri.")),
+      rows.length < data.totale ? h("button", {type: "button", class: "btn small", onclick: more}, t("Mostra altri 50")) : null);
+  }
+  async function openRecord(id) {
+    let d;
+    try { d = await api(`/api/eurydike/revisioni/${rid}/lavagna/${encodeURIComponent(id)}${rq ? "?" + rq : ""}`); }
+    catch (e) { put(detail, h("p", {class: "error"}, e.message)); return; }
+    if (scrState.sel !== id) return;
+    crit = d.mia && d.mia.criterio ? d.mia.criterio : null;
+    const excl = d.criteri.filter((c) => c.tipo === "exclusion");
+    const msg = h("div", {class: "state-line", role: "status"});
+    const why = h("input", {type: "text", name: "motivo", value: d.mia && d.mia.motivo ? d.mia.motivo : "", "aria-label": t("Motivo (facoltativo)")});
+    const write = async (decisione) => {
+      if (decisione === "exclude" && !crit) { put(msg, h("span", {class: "error"}, t("Per escludere scegli il criterio (tasti 1, 2, …)."))); return; }
+      try {
+        await postJson(`/api/eurydike/revisioni/${rid}/decisione`, {record: id, decisione, criterio: decisione === "exclude" ? crit : null, motivo: why.value, revisore: me || null});
+        clearCache();
+        const i = rows.findIndex((r) => r.id === id);
+        const changed = !!d.mia;
+        await load(true);
+        if (scrState.filtro === "da_decidere" || !changed) { const next = rows[Math.min(i + (scrState.filtro === "da_decidere" ? 0 : 1), rows.length - 1)]; if (next) select(next.id); }
+        else openRecord(id);
+      } catch (err) { put(msg, h("span", {class: "error"}, err.message)); }
+    };
+    const pressed = (k) => String(!!(d.mia && d.mia.decisione === k));
+    const labIn = h("input", {type: "text", list: "scr-labels", placeholder: t("Nuova etichetta"), "aria-label": t("Nuova etichetta"), maxlength: "40"});
+    const label = async (azione, etichetta) => {
+      try { await postJson(`/api/eurydike/revisioni/${rid}/etichette`, {record: id, azione, etichetta}); clearCache(); await load(true); }
+      catch (err) { put(msg, h("span", {class: "error"}, err.message)); }
+    };
+    const i = rows.findIndex((r) => r.id === id);
+    put(detail,
+      h("div", {class: "block-head"}, h("h2", {id: "h-det"}, i >= 0 ? `${t("Record")} ${i + 1} ${t("di")} ${fmtN(data.totale)}` : t("Record")),
+        h("span", {class: "scr-nav"}, h("button", {type: "button", class: "btn small", onclick: () => step(-1), disabled: i <= 0 ? "" : null, title: t("Precedente (K)")}, "←"),
+          h("button", {type: "button", class: "btn small", onclick: () => step(1), disabled: i < 0 || i >= rows.length - 1 ? "" : null, title: t("Successivo (J)")}, "→"))),
+      h("h3", {class: "scr-title", lang: "en"}, ...highlight(d.titolo, d.parole)),
+      h("p", {class: "muted"}, [d.autori, d.anno, d.rivista].filter(Boolean).join(" · "), d.doi ? [" · ", h("a", {href: `https://doi.org/${d.doi}`, target: "_blank", rel: "noopener"}, `doi ${d.doi}`)] : null,
+        d.pmid ? [" · ", h("a", {href: `https://pubmed.ncbi.nlm.nih.gov/${d.pmid}/`, target: "_blank", rel: "noopener"}, `PMID ${d.pmid}`)] : null),
+      d.abstract ? h("p", {class: "abstract", lang: "en"}, ...highlight(d.abstract, d.parole)) : h("p", {class: "muted"}, t("Senza abstract: nel dubbio «Forse».")),
+      ruleProposals(d, rid, me, async () => { clearCache(); await load(true); if (scrState.sel === id) openRecord(id); }),
+      h("div", {class: "scr-decide"},
+        d.mia ? h("p", {class: "muted"}, `${t("La tua decisione")}: `, tag(t((EUR_DEC[d.mia.decisione] || [d.mia.decisione])[0]), (EUR_DEC[d.mia.decisione] || [])[1]), " ", t("— puoi cambiarla.")) : null,
+        h("div", {class: "action-row screen-actions"},
+          h("button", {type: "button", class: "btn dec-in", "aria-pressed": pressed("include"), onclick: () => write("include")}, "✓ ", t("Includi"), h("kbd", null, "I")),
+          h("button", {type: "button", class: "btn dec-may", "aria-pressed": pressed("maybe"), onclick: () => write("maybe")}, "? ", t("Forse"), h("kbd", null, "M")),
+          h("button", {type: "button", class: "btn dec-out", "aria-pressed": pressed("exclude"), onclick: () => write("exclude")}, "✕ ", t("Escludi"), h("kbd", null, "E"))),
+        h("fieldset", {class: "scr-crit"}, h("legend", null, t("Criterio di esclusione")), excl.map((c, k) =>
+          h("label", {class: "crit"}, h("input", {type: "radio", name: "crit", value: c.id, checked: crit === c.id ? true : null, onchange: () => { crit = c.id; }}),
+            h("kbd", null, String(k + 1)), h("span", {lang: "en"}, c.testo)))),
+        h("label", {class: "fld"}, h("span", null, t("Motivo (facoltativo)")), why), msg),
+      h("div", {class: "scr-labels"}, h("span", {class: "set-label"}, t("Etichette")), ...d.etichette.map((x) => h("span", {class: "tag acc"}, x, " ",
+        h("button", {type: "button", class: "tag-x", "aria-label": `${t("Togli l'etichetta")} ${x}`, onclick: () => label("togli", x)}, "×"))),
+        h("form", {class: "inline-form", onsubmit: (e) => { e.preventDefault(); if (labIn.value.trim()) label("aggiungi", labIn.value.trim()); }}, labIn,
+          h("button", {type: "submit", class: "btn small"}, t("Aggiungi"))),
+        h("datalist", {id: "scr-labels"}, (data.tutte_le_etichette || []).map((x) => h("option", {value: x})))),
+      d.altre ? h("div", {class: "scr-others"}, h("span", {class: "set-label"}, t("Decisioni degli altri")),
+        d.altre.length ? d.altre.map((o) => h("div", null, h("b", null, `${o.revisore}: `), tag(t((EUR_DEC[o.decisione] || [o.decisione])[0]), (EUR_DEC[o.decisione] || [])[1]),
+          o.motivo ? h("span", {class: "muted", lang: "en"}, ` ${o.motivo}`) : null)) : h("span", {class: "muted"}, t("nessuna")))
+        : (d.nascoste ? h("p", {class: "muted"}, t("Le decisioni degli altri revisori si vedono dopo la tua (cieco).")) : null),
+      h("p", {class: "src"}, t("Tasti: I includi, M forse, E escludi; 1, 2, … criterio; J / K record successivo / precedente.")));
+    detail.__write = write;
+    detail.__crit = (k) => { const c = excl[k]; if (!c) return; crit = c.id; const el = detail.querySelector(`input[name=crit][value="${c.id}"]`); if (el) el.checked = true; };
+  }
+  function drawSide() {
+    const c = data.conteggi;
+    const kwBlock = (kind, title, cls) => {
+      const inp = h("input", {type: "text", placeholder: t("Aggiungi una parola"), "aria-label": `${t(title)}: ${t("Aggiungi una parola")}`, maxlength: "80"});
+      const add = async (w) => { try { await postJson(`/api/eurydike/revisioni/${rid}/parole`, {azione: "aggiungi", tipo: kind, parola: w}); clearCache(); load(true); } catch (e) { alert(e.message); } };
+      const sug = (data.suggerite || {})[kind] || [];
+      return h("section", {class: "block side-f"}, h("h2", null, h("span", {class: `kw-dot ${cls}`, "aria-hidden": "true"}), t(title)),
+        c.parole[kind].length ? h("div", {class: "checks"}, c.parole[kind].map((x) => h("span", {class: `kw-chip ${cls}`},
+          h("button", {type: "button", class: "chip", "aria-pressed": String(scrState.parola.toLowerCase() === x.parola.toLowerCase()),
+            onclick: () => { scrState.parola = scrState.parola.toLowerCase() === x.parola.toLowerCase() ? "" : x.parola; load(); }}, x.parola, h("span", {class: "muted"}, ` ${fmtN(x.n)}`)),
+          h("button", {type: "button", class: "tag-x", "aria-label": `${t("Togli")} ${x.parola}`, onclick: async () => {
+            try { await postJson(`/api/eurydike/revisioni/${rid}/parole`, {azione: "togli", id: x.id}); clearCache(); if (scrState.parola === x.parola) scrState.parola = ""; load(true); } catch (e) { alert(e.message); } }}, "×"))))
+          : h("p", {class: "muted"}, t("Nessuna parola.")),
+        h("form", {class: "inline-form", onsubmit: (e) => { e.preventDefault(); if (inp.value.trim()) add(inp.value.trim()); }}, inp, h("button", {type: "submit", class: "btn small"}, "+")),
+        sug.length ? h("div", {class: "checks sug"}, h("span", {class: "muted"}, t("Dai criteri:")), sug.slice(0, 8).map((w) => h("button", {type: "button", class: "chip sug-chip", onclick: () => add(w)}, `+ ${w}`))) : null);
+    };
+    const chipList = (items, key, val, lab) => items.length ? h("div", {class: "checks"}, items.map((x) => h("button", {type: "button", class: "chip",
+      "aria-pressed": String(scrState[key] === val(x)), onclick: () => { scrState[key] = scrState[key] === val(x) ? "" : val(x); load(); }}, lab(x), h("span", {class: "muted"}, ` ${fmtN(x.n)}`)))) : null;
+    put(side,
+      kwBlock("include", "Parole per includere", "kw-in"), kwBlock("exclude", "Parole per escludere", "kw-out"),
+      h("section", {class: "block side-f"}, h("h2", null, t("Etichette")), chipList(c.etichette, "etichetta", (x) => x.etichetta, (x) => x.etichetta) || h("p", {class: "muted"}, t("Nessuna etichetta: aggiungile dal record."))),
+      h("section", {class: "block side-f"}, h("h2", null, t("I miei motivi di esclusione")), chipList(c.motivi, "motivo", (x) => x.id, (x) => h("span", {title: x.testo, lang: "en"}, `E${x.ord} ${x.testo.length > 28 ? x.testo.slice(0, 27) + "…" : x.testo}`)) || h("p", {class: "muted"}, t("Nessun record escluso."))),
+      h("section", {class: "block side-f"}, h("h2", null, t("Numero di decisioni")), h("div", {class: "checks"}, SCR_NUM.map(([k, l]) => h("button", {type: "button", class: "chip", "aria-pressed": String(scrState.numero === k),
+        onclick: () => { scrState.numero = k; load(); }}, t(l), k !== "qualsiasi" ? h("span", {class: "muted"}, ` ${fmtN(c.numero[k] || 0)}`) : null))),
+        h("p", {class: "src"}, t("Quanti revisori hanno deciso, non che cosa (cieco)."))));
+  }
+  const onKey = (e) => {
+    if (!document.body.contains(detail)) { document.removeEventListener("keydown", onKey); return; }
+    if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "radio") return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === "i" && detail.__write) { e.preventDefault(); detail.__write("include"); }
+    else if (k === "e" && detail.__write) { e.preventDefault(); detail.__write("exclude"); }
+    else if ((k === "m" || k === "f") && detail.__write) { e.preventDefault(); detail.__write("maybe"); }
+    else if (k === "j" || k === "arrowdown") { e.preventDefault(); step(1); }
+    else if (k === "k" || k === "arrowup") { e.preventDefault(); step(-1); }
+    else if (/^[1-9]$/.test(k) && detail.__crit) detail.__crit(Number(k) - 1);
+  };
+  document.addEventListener("keydown", onKey);
+  await load();
+  return [eurBar(list, cur, "screening"), ...head(t("Screening"), t("Titolo e abstract: scegli un record a sinistra (anche uno già deciso, per cambiare la decisione); le parole verdi e rosse sono evidenziate nel testo. La decisione finale è calcolata dalle decisioni dei revisori.")),
+    claudeLotsBlock(cur, st, () => load(true)), await rulesBlock(cur, me, () => load(true)),
+    h("div", {class: "scr-grid"}, listBox, detail, side),
+    h("p", {class: "src"}, kappaText(cur.screening.kappa)), srcLine(cur.screening)];
 }
 function proposalCell(p) {
   if (!p) return h("span", {class: "muted"}, "—");
@@ -2469,62 +2870,490 @@ function proposalCell(p) {
 function articleLink(aid, label) {
   return aid ? h("button", {type: "button", class: "linklike", onclick: () => openArticle(aid)}, label || t("apri l'articolo")) : h("span", {class: "muted"}, t("non in ORPHEUS"));
 }
-function eurFulltext(list, cur) {
-  const f = cur.fulltext;
-  const cols = [
-    {key: "studio", label: t("Studio"), sort: true, cell: (r) => h("div", null, h("b", null, r.studio), r.titolo ? h("div", {class: "muted", lang: "en"}, r.titolo) : null)},
-    {key: "articolo", label: t("Articolo di ORPHEUS"), cell: (r) => articleLink(r.articolo)},
-    {key: "pagine", label: t("PDF"), num: true, sort: true, cell: (r) => r.pagine ? `${fmtN(r.pagine)} p.` : tag(t("manca"), "warn")},
-    {key: "proposta", label: t("Proposta di Claude"), cell: (r) => proposalCell(r.proposta)},
-    {key: "decisione", label: t("Decisione"), sort: true, cell: (r) => { const [x, k] = EUR_FT[r.decisione] || [r.decisione, ""];
-      return h("div", null, tag(t(x), k), r.criterio ? h("div", {class: "muted"}, `E${r.criterio_ord} ${r.criterio}`) : null,
-        r.nota ? h("div", null, h("i", null, r.nota)) : null, r.deciso_da ? h("div", {class: "muted"}, `${r.deciso_da}, ${fmtDate(r.deciso_il, false)}`) : null); }}];
-  const holder = h("div");
-  const render = () => put(holder, f.studi.length ? sortableTable(cols, sortRows(f.studi, eurState, cols), {state: eurState, rerender: render})
-    : h("p", {class: "empty"}, t("Nessuno studio ancora: gli studi nascono dai record inclusi allo screening.")));
-  render();
-  return [eurBar(list, cur, "fulltext"), ...head(t("Full text"), t("La decisione sul full text la prendi tu (o il consenso): Claude propone soltanto, con la frase del PDF.")),
-    holder, srcLine(f)];
+/* EURYDIKE E5 · Full text (2026-11-03): studies on the left, the study in the middle with its PDF, the decision
+   (include / exclude with a criterion / not retrieved) written by the user; Claude's proposal only after it (blind). */
+const FT_FILTERS = [["da_decidere", "Da decidere"], ["senza_pdf", "Senza PDF"], ["tutti", "Tutti"], ["inclusi", "Inclusi"],
+  ["esclusi", "Esclusi"], ["non_reperiti", "Non reperiti"]];
+const FT_DEC = {pending: ["da decidere", ""], include: ["incluso", "good"], exclude: ["escluso", "crit"], not_retrieved: ["non reperito", "warn"]};
+const ftState = {filtro: "da_decidere", sel: null};
+async function eurFulltext(list, cur) {
+  const rid = encodeURIComponent(cur.revisione.id);
+  let me = "";
+  try { me = localStorage.getItem("eurydike-revisore") || ""; } catch (e) { me = ""; }
+  const prep = h("section", {class: "block", "aria-labelledby": "h-ftprep"});
+  const listBox = h("section", {class: "block scr-list", "aria-labelledby": "h-ftlist"});
+  const detail = h("section", {class: "block scr-detail ft-detail", "aria-live": "polite"});
+  let data = null;
+  const say = (box, txt, k) => put(box, tag(txt, k || "good"));
+  const act = (azione, body, done) => async (e) => {
+    const b = e && e.currentTarget; if (b) b.disabled = true;
+    try { const out = await postJson(`/api/eurydike/revisioni/${rid}/fulltext/${azione}`, body ? body() : {}); clearCache(); await load(true); if (done) done(out); }
+    catch (err) { alert(err.message); }
+    if (b) b.disabled = false;
+  };
+  const load = async (keep) => {
+    data = await api(`/api/eurydike/revisioni/${rid}/fulltext?filtro=${ftState.filtro}`);
+    if (!keep || !data.righe.some((r) => r.id === ftState.sel)) ftState.sel = data.righe.length ? data.righe[0].id : null;
+    drawPrep(); drawList(); drawDetail();
+  };
+  function drawPrep() {
+    const msg = h("p", {role: "status", class: "muted"});
+    const n = h("input", {type: "number", min: "1", max: "40", value: "5", class: "num-in", "aria-label": t("Pacchetti da preparare")});
+    const c = data.claude;
+    put(prep, h("div", {class: "block-head"}, h("h2", {id: "h-ftprep"}, t("Preparazione")),
+        h("span", {class: "muted"}, `${fmtN(data.passano)} ${t("record passano al full text")} · ${fmtN(data.conteggi.tutti)} ${t("studi")} · ${fmtN(data.conteggi.senza_pdf)} ${t("senza PDF")}`)),
+      h("div", {class: "ft-steps"},
+        h("div", null, h("div", {class: "ft-step-h"}, h("b", null, "1. "), t("Studi dai record che passano")), h("div", {class: "action-row"},
+          h("button", {type: "button", class: "btn" + (data.da_preparare ? " primary" : ""), disabled: data.da_preparare ? null : "",
+            onclick: act("prepara", null, (o) => say(msg, `${t("Studi nuovi")}: ${fmtN(o.nuovi)}`))}, `${t("Prepara gli studi")} (${fmtN(data.da_preparare)})`))),
+        h("div", null, h("div", {class: "ft-step-h"}, h("b", null, "2. "), t("Metti i PDF in questa cartella:")), " ", h("code", null, data.cartella), h("div", {class: "action-row"},
+          h("button", {type: "button", class: "btn", onclick: act("leggi_pdf", null, (o) => say(msg, `${t("PDF letti")}: ${fmtN(o.file.length)} · ${t("da collegare a mano")}: ${fmtN(o.da_collegare.length)}`, o.da_collegare.length ? "warn" : "good"))}, t("Leggi i PDF nuovi")))),
+        h("div", null, h("div", {class: "ft-step-h"}, h("b", null, "3. "), t("Claude, secondo revisore in cieco")), h("span", {class: "muted"}, `${fmtN(c.proposte)} ${t("proposte")} · ${fmtN(c.pacchetti_aperti)} ${t("pacchetti aperti")} · ${fmtN(c.da_proporre)} ${t("da proporre")}`),
+          h("div", {class: "action-row"}, h("label", {class: "ft-n"}, h("span", null, t("Pacchetti (1 studio)")), n),
+            h("button", {type: "button", class: "btn", onclick: act("pacchetti", () => ({quanti: Number(n.value) || 5}), (o) => say(msg, `${t("Pacchetti aperti")}: ${fmtN(o.aperti.length)}. ${t("Chiedi a Claude di leggerli.")}`))}, t("Prepara i pacchetti per Claude")),
+            h("button", {type: "button", class: "btn", onclick: act("risposte", null, (o) => say(msg, `${t("Risposte di Claude")}: ${fmtN(o.accettate)} ${t("accettate")}, ${fmtN(o.rifiutate)} ${t("rifiutate")}`, o.rifiutate ? "warn" : "good"))}, t("Leggi le risposte di Claude"))))),
+      data.pdf_da_collegare.length ? h("div", {class: "ft-unlinked"}, h("p", null, tag(t("PDF da collegare"), "warn"), " ", t("Non riconosciuti dal DOI né dal titolo: scegli lo studio.")),
+        h("ul", {class: "notes"}, data.pdf_da_collegare.map((x) => {
+          const sel = h("select", {"aria-label": `${t("Studio per")} ${x.file}`}, h("option", {value: ""}, t("— scegli lo studio —")),
+            data.righe.filter((r) => !r.pdf).map((r) => h("option", {value: r.id}, (r.titolo || "").slice(0, 90))));
+          return h("li", null, h("span", null, h("b", null, x.file), h("span", {class: "muted"}, ` ${x.titolo_pdf || ""} · ${fmtN(x.pagine)} p.`)), sel,
+            h("button", {type: "button", class: "btn small", onclick: act("collega", () => ({studio: sel.value, documento: x.documento}))}, t("Collega")));
+        }))) : null, msg);
+  }
+  function drawList() {
+    const c = data.conteggi;
+    put(listBox, h("div", {class: "block-head"}, h("h2", {id: "h-ftlist"}, t("Studi")), h("span", {class: "muted"}, `${fmtN(data.righe.length)}`)),
+      h("div", {class: "checks"}, FT_FILTERS.map(([k, l]) => h("button", {type: "button", class: "chip", "aria-pressed": String(ftState.filtro === k),
+        onclick: () => { ftState.filtro = k; load(); }}, t(l), h("span", {class: "muted"}, ` ${fmtN(c[k] || 0)}`)))),
+      data.righe.length ? h("ol", {class: "scr-items"}, data.righe.map((r, i) => h("li", null, h("button", {type: "button", class: "scr-item", "aria-current": r.id === ftState.sel ? "true" : null,
+        onclick: () => { ftState.sel = r.id; drawList(); drawDetail(); }}, h("span", {class: "scr-n"}, String(i + 1)), h("span", {class: "scr-t", lang: "en"}, r.titolo),
+        h("span", {class: "scr-meta"}, tag(t(FT_DEC[r.decisione][0]), FT_DEC[r.decisione][1]), r.pdf ? h("span", {class: "muted"}, ` PDF ${fmtN(r.pagine)} p.`) : tag(t("senza PDF"), "warn"),
+          r.anno ? h("span", {class: "muted"}, ` · ${r.anno}`) : null)))))
+        : h("p", {class: "empty"}, data.conteggi.tutti ? t("Nessuno studio con questo filtro.") : t("Nessuno studio ancora: «Prepara gli studi».")));
+  }
+  function drawDetail() {
+    const r = data.righe.find((x) => x.id === ftState.sel);
+    if (!r) { put(detail, h("p", {class: "empty"}, t("Scegli uno studio a sinistra."))); return; }
+    let crit = r.criterio_id || null;
+    const excl = data.criteri.filter((c) => c.tipo === "exclusion");
+    const note = h("textarea", {rows: "2", lang: "en", "aria-label": t("Nota (in inglese)")}, r.nota || "");
+    const msg = h("div", {role: "status"});
+    const write = async (decisione) => {
+      if (decisione !== "include" && !crit) { put(msg, h("span", {class: "error"}, t("Per escludere (o non reperito) scegli il criterio."))); return; }
+      try {
+        await postJson(`/api/eurydike/revisioni/${rid}/fulltext/decisione`, {studio: r.id, decisione, criterio: decisione === "include" ? null : crit, nota: note.value, revisore: me || null});
+        clearCache(); const i = data.righe.findIndex((x) => x.id === r.id); await load(true);
+        if (ftState.filtro === "da_decidere" && data.righe.length) { ftState.sel = data.righe[Math.min(i, data.righe.length - 1)].id; drawList(); drawDetail(); }
+      } catch (err) { put(msg, h("span", {class: "error"}, err.message)); }
+    };
+    const pressed = (k) => String(r.decisione === k);
+    const pdfUrl = r.documento ? `/api/eurydike/documenti/${encodeURIComponent(r.documento)}/pdf` : null;
+    const cl = r.claude;
+    put(detail,
+      h("h3", {class: "scr-title", lang: "en"}, r.titolo),
+      h("p", {class: "muted"}, [r.autori, r.anno, r.rivista].filter(Boolean).join(" · "), r.doi ? [" · ", h("a", {href: `https://doi.org/${r.doi}`, target: "_blank", rel: "noopener"}, `doi ${r.doi}`)] : null),
+      pdfUrl ? h("div", {class: "ft-pdf"}, h("div", {class: "action-row"}, h("a", {class: "btn small", href: pdfUrl, target: "_blank", rel: "noopener"}, t("Apri il PDF in una scheda")),
+        h("span", {class: "muted"}, `${fmtN(r.pagine)} ${t("pagine")}`)), h("iframe", {src: pdfUrl, title: `PDF: ${r.titolo}`, loading: "lazy"}))
+        : h("p", {class: "notice"}, t("Manca il PDF: mettilo nella cartella del punto 2 e premi «Leggi i PDF nuovi». Se non lo trovi, «Non reperito».")),
+      h("div", {class: "scr-decide"},
+        r.decisione !== "pending" ? h("p", {class: "muted"}, `${t("La tua decisione")}: `, tag(t(FT_DEC[r.decisione][0]), FT_DEC[r.decisione][1]), " ", t("— puoi cambiarla.")) : null,
+        h("div", {class: "action-row screen-actions"},
+          h("button", {type: "button", class: "btn dec-in", "aria-pressed": pressed("include"), onclick: () => write("include")}, "✓ ", t("Includi")),
+          h("button", {type: "button", class: "btn dec-out", "aria-pressed": pressed("exclude"), onclick: () => write("exclude")}, "✕ ", t("Escludi")),
+          h("button", {type: "button", class: "btn dec-may", "aria-pressed": pressed("not_retrieved"), onclick: () => write("not_retrieved")}, t("Non reperito"))),
+        h("fieldset", {class: "scr-crit"}, h("legend", null, t("Criterio (per escludere o non reperito)")), excl.map((c, k) =>
+          h("label", {class: "crit"}, h("input", {type: "radio", name: "ftcrit", value: c.id, checked: crit === c.id ? true : null, onchange: () => { crit = c.id; }}),
+            h("kbd", null, String(k + 1)), h("span", {lang: "en"}, c.testo)))),
+        h("label", {class: "fld"}, h("span", null, t("Nota (in inglese, facoltativa)")), note), msg),
+      cl === "nascosta" ? h("p", {class: "muted ft-claude"}, t("Claude ha fatto la sua proposta: la vedi dopo la tua decisione (cieco)."))
+        : cl ? h("div", {class: "ft-claude"}, h("span", {class: "set-label"}, t("Proposta di Claude")),
+          h("p", null, tag(t({include: "includere", exclude: "escludere", unsure: "incerto"}[cl.decisione] || cl.decisione), {include: "good", exclude: "crit", unsure: "warn"}[cl.decisione]),
+            cl.criterio ? h("span", {class: "muted", lang: "en"}, ` E${cl.criterio.ord} ${cl.criterio.testo}`) : null),
+          h("p", {lang: "en"}, h("b", null, t("Sintesi") + ": "), cl.sintesi), h("p", {lang: "en"}, h("b", null, t("Motivo") + ": "), cl.motivo),
+          cl.frase ? h("blockquote", {lang: "en"}, `“${cl.frase}”`, " ", pdfUrl ? h("a", {href: `${pdfUrl}#page=${cl.pagina}`, target: "_blank", rel: "noopener"}, `p. ${cl.pagina}`) : `p. ${cl.pagina}`) : null) : null);
+  }
+  await load();
+  return [eurBar(list, cur, "fulltext"), ...head(t("Full text"), t("Gli studi che passano lo screening si leggono per intero. La decisione la prendi tu (includi, escludi con il criterio, non reperito); Claude propone in cieco, con una frase e la pagina del PDF.")),
+    prep, h("div", {class: "scr-grid ft-grid"}, listBox, detail), srcLine(data)];
 }
+/* EURYDIKE E6 · Estrazione dei dati (2026-11-03: «Scheda unica + campi», «Claude, tu confermi», «Accanto, alla pagina»).
+   The form of the review (card fields + fields of the review, versions frozen), Claude's packets, the included studies;
+   a study opens with its values on the left and the PDF on the right, at the page of the sentence. */
+const EX_TYPES = [["text", "testo breve"], ["long", "testo lungo"], ["number", "numero"], ["choice", "una scelta"], ["multi", "più scelte"], ["bool", "sì / no"]];
+const EX_STATE = {ai: ["da controllare", "warn"], confirmed: ["confermato", "good"], edited: ["corretto a mano", "acc"], nr: ["non riportato", ""], vuoto: ["da estrarre", ""]};
+function exShow(v) { return v === null || v === undefined ? null : Array.isArray(v) ? v.join("; ") : ({si: t("sì"), no: "no"}[v] || String(v)); }
 async function eurExtraction(list, cur) {
   const view = liveView;
-  const out = [];
-  if (cur) {
-    const e = cur.estrazione;
-    out.push(eurBar(list, cur, "estrazione"), h("section", {class: "block"}, h("h2", null, t("Studi inclusi nella revisione")),
-      e.studi.length ? h("ul", {class: "notes"}, e.studi.map((x) => h("li", null, h("b", null, x.studio), " ",
-        x.scheda ? [tag(`${fmtN(x.scheda.valori)} ${t("valori")}`), " ", x.scheda.da_controllare ? tag(`${fmtN(x.scheda.da_controllare)} ${t("da controllare")}`, "warn") : tag(t("tutto controllato"), "good"), " ",
-          h("a", {href: `#/eurydike/estrazione?a=${encodeURIComponent(x.articolo)}`}, t("apri la scheda"))]
-          : tag(x.articolo ? t("scheda da scrivere") : t("non in ORPHEUS: scheda da scrivere"), "warn"))))
-        : h("p", {class: "empty"}, t("Nessuno studio incluso al full text.")), srcLine(e)));
+  if (!cur) { await cardsList(); return; }
+  const rid = encodeURIComponent(cur.revisione.id);
+  let me = "";
+  try { me = localStorage.getItem("eurydike-revisore") || ""; } catch (e) { me = ""; }
+  const formBox = h("section", {class: "block", "aria-labelledby": "h-exform"});
+  const claudeBox = h("section", {class: "block", "aria-labelledby": "h-exclaude"});
+  const studiesBox = h("section", {class: "block", "aria-labelledby": "h-exstudi"});
+  let data = null;
+  const load = async () => { data = await api(`/api/eurydike/revisioni/${rid}/estrazione${me ? `?revisore=${encodeURIComponent(me)}` : ""}`); drawForm(); drawClaude(); drawStudies(); };
+  const act = (azione, body, done) => async (e) => {
+    const b = e && e.currentTarget; if (b) b.disabled = true;
+    try { const out = await postJson(`/api/eurydike/revisioni/${rid}/estrazione/${azione}`, body ? body() : {}); clearCache(); await load(); if (done) done(out); }
+    catch (err) { alert(err.message); }
+    if (b) b.disabled = false;
+  };
+  function drawForm() {
+    const m = data.modulo;
+    const chosen = new Set(m.campi_scheda);
+    const msg = h("p", {role: "status", class: "muted"});
+    const groups = {};
+    for (const c of m.catalogo_scheda) (groups[c.gruppo] = groups[c.gruppo] || []).push(c);
+    const boxes = Object.entries(groups).map(([g, items]) => h("fieldset", {class: "ex-cardf"}, h("legend", null, t(g)),
+      items.map((c) => h("label", {class: "crit", title: c.descrizione}, h("input", {type: "checkbox", value: c.key, checked: chosen.has(c.key) ? true : null,
+        onchange: (e) => { if (e.target.checked) chosen.add(c.key); else chosen.delete(c.key); }}), h("span", null, FIELD[c.key] || c.key)))));
+    const rows = m.campi_revisione.map((f) => ({etichetta: f.etichetta, key: f.key, tipo: f.tipo, opzioni: (f.opzioni || []).join("\n"),
+      unita: f.unita || "", istruzione: f.istruzione || "", sezione: f.sezione || "", obbligatorio: f.obbligatorio}));
+    const list = h("ol", {class: "ex-fields"});
+    const drawRows = () => {
+      put(list, rows.map((r, i) => {
+        const optsIn = h("textarea", {rows: "3", lang: "en", oninput: (e) => { r.opzioni = e.target.value; }}, r.opzioni);
+        const opts = h("label", {class: "fld", hidden: (r.tipo === "choice" || r.tipo === "multi") ? null : true}, h("span", null, t("Opzioni, una per riga")), optsIn);
+        return h("li", {class: "ex-field"},
+          field(t("Nome del campo"), h("input", {type: "text", lang: "en", value: r.etichetta, oninput: (e) => { r.etichetta = e.target.value; }})),
+          field(t("Tipo"), h("select", {onchange: (e) => { r.tipo = e.target.value; opts.hidden = !(r.tipo === "choice" || r.tipo === "multi"); }},
+            EX_TYPES.map(([k, l]) => h("option", {value: k, selected: r.tipo === k ? true : null}, t(l))))),
+          field(t("Unità"), h("input", {type: "text", size: 6, value: r.unita, oninput: (e) => { r.unita = e.target.value; }})),
+          field(t("Istruzione per Claude (in inglese)"), h("input", {type: "text", lang: "en", value: r.istruzione, oninput: (e) => { r.istruzione = e.target.value; }})),
+          opts,
+          h("button", {type: "button", class: "btn small", "aria-label": `${t("Togli il campo")} ${r.etichetta}`, onclick: () => { rows.splice(i, 1); drawRows(); }}, t("Togli")));
+      }));
+    };
+    drawRows();
+    const st = m.stato === "frozen" ? tag(`${t("versione")} ${m.versione} · ${t("bloccato")}`, "good") : m.stato === "draft" ? tag(`${t("versione")} ${m.versione} · ${t("bozza")}`, "warn") : tag(t("non ancora salvato"), "warn");
+    put(formBox, h("div", {class: "block-head"}, h("h2", {id: "h-exform"}, t("Modulo di estrazione")), st,
+        m.versione_bloccata && m.versione_bloccata !== m.versione ? h("span", {class: "muted"}, ` ${t("i pacchetti usano la versione bloccata")} ${m.versione_bloccata}`) : null),
+      h("p", {class: "muted"}, t("Campi della scheda unica dell'articolo (condivisa con ORPHEUS: un valore già nella scheda non si estrae di nuovo) più i campi di questa revisione. Ogni modifica salvata è una versione nuova; prima dei pacchetti si blocca.")),
+      h("details", {class: "ex-cardsel"}, h("summary", null, `${t("Campi della scheda")} (${fmtN(chosen.size)})`), boxes),
+      h("h3", null, t("Campi della revisione")), list,
+      h("div", {class: "action-row"},
+        h("button", {type: "button", class: "btn", onclick: () => { rows.push({etichetta: "", tipo: "text", opzioni: "", unita: "", istruzione: "", sezione: "", obbligatorio: false}); drawRows(); }}, t("+ Aggiungi un campo")),
+        h("button", {type: "button", class: "btn primary", onclick: act("modulo", () => ({campi_scheda: [...chosen], campi_revisione: rows}),
+          (o) => put(msg, tag(o.nuova ? `${t("Salvata la versione")} ${o.versione}` : t("Nessuna modifica"), "good")))}, t("Salva il modulo")),
+        h("button", {type: "button", class: "btn", disabled: m.stato === "draft" ? null : "", onclick: act("blocca", null, (o) => put(msg, tag(`${t("Modulo bloccato: versione")} ${o.versione}`, "good")))}, t("Blocca il modulo"))),
+      msg);
   }
-  await cardsList();
-  if (out.length) view.prepend(...out);
+  function drawClaude() {
+    const c = data.claude, k = data.conteggi;
+    const msg = h("p", {role: "status", class: "muted"});
+    const n = h("input", {type: "number", min: "1", max: "40", value: "5", class: "num-in", "aria-label": t("Pacchetti da preparare")});
+    put(claudeBox, h("div", {class: "block-head"}, h("h2", {id: "h-exclaude"}, t("Claude estrae, tu confermi")),
+        h("span", {class: "muted"}, `${fmtN(k.estratti)}/${fmtN(k.inclusi)} ${t("studi estratti")} · ${fmtN(c.pacchetti_aperti)} ${t("pacchetti aperti")} · ${fmtN(c.da_estrarre)} ${t("da estrarre")}`)),
+      h("p", {class: "muted"}, t("Un pacchetto per studio incluso, nella cartella"), " ", h("code", null, data.cartella), ". ", t("Ogni valore ha la frase e la pagina del PDF: se la frase non si ritrova, la risposta è rifiutata.")),
+      k.senza_articolo ? h("p", {class: "notice"}, `${fmtN(k.senza_articolo)} ${t("studi senza articolo in ORPHEUS: i campi della scheda si saltano finché il DOI non è verificato («Aggiorna gli articoli»), poi «Collega gli articoli».")}`,
+        " ", h("button", {type: "button", class: "btn small", onclick: act("collega_articoli", null, (o) => put(msg, tag(`${t("Collegati")}: ${fmtN(o.collegati)}`, "good")))}, t("Collega gli articoli"))) : null,
+      h("div", {class: "action-row"}, h("label", {class: "ft-n"}, h("span", null, t("Pacchetti (1 studio)")), n),
+        h("button", {type: "button", class: "btn", disabled: data.modulo.versione_bloccata ? null : "", onclick: act("pacchetti", () => ({quanti: Number(n.value) || 5}),
+          (o) => put(msg, tag(`${t("Pacchetti aperti")}: ${fmtN(o.aperti.length)}. ${t("Chiedi a Claude di leggerli.")}`, "good")))}, t("Prepara i pacchetti per Claude")),
+        h("button", {type: "button", class: "btn", onclick: act("risposte", null, (o) => put(msg, tag(`${t("Risposte di Claude")}: ${fmtN(o.accettate)} ${t("accettate")}, ${fmtN(o.rifiutate)} ${t("rifiutate")}`, o.rifiutate ? "warn" : "good")))}, t("Leggi le risposte di Claude"))),
+      data.modulo.versione_bloccata ? null : h("p", {class: "muted"}, t("Blocca il modulo per preparare i pacchetti.")), msg);
+  }
+  function drawStudies() {
+    const rows = data.studi;
+    put(studiesBox, h("div", {class: "block-head"}, h("h2", {id: "h-exstudi"}, t("Studi inclusi")), h("span", {class: "muted"}, `${fmtN(rows.length)} · ${fmtN(data.conteggi.da_controllare)} ${t("valori da controllare")}`)),
+      rows.length ? h("div", {class: "table-wrap"}, h("table", null,
+        h("thead", null, h("tr", null, ["Studio", "PDF", "Claude", "Scheda da controllare", "Revisione da controllare"].map((x, i) => h("th", {scope: "col", class: i >= 3 ? "n" : null}, t(x))))),
+        h("tbody", null, rows.map((r) => h("tr", {class: "clickable", tabindex: "0", onclick: () => go(`eurydike/estrazione?r=${rid}&s=${encodeURIComponent(r.id)}`),
+          onkeydown: (e) => { if (e.key === "Enter") go(`eurydike/estrazione?r=${rid}&s=${encodeURIComponent(r.id)}`); }},
+          h("td", null, h("a", {href: `#/eurydike/estrazione?r=${rid}&s=${encodeURIComponent(r.id)}`, lang: "en"}, r.titolo), r.anno ? h("span", {class: "muted"}, ` · ${r.anno}`) : null,
+            r.articolo ? null : h("div", null, tag(t("senza articolo in ORPHEUS"), "warn"))),
+          h("td", null, r.pdf ? `${fmtN(r.pagine)} p.` : tag(t("senza PDF"), "warn")),
+          h("td", null, r.estratto_da_claude ? tag(t("estratto"), "good") : tag(t("da estrarre"))),
+          h("td", {class: "n"}, r.scheda_da_controllare ? tag(fmtN(r.scheda_da_controllare), "warn") : "0"),
+          h("td", {class: "n"}, r.revisione_da_controllare === null ? "—" : r.revisione_da_controllare ? tag(fmtN(r.revisione_da_controllare), "warn") : "0"))))))
+        : h("p", {class: "empty"}, t("Nessuno studio incluso al full text.")));
+  }
+  await load();
+  put(view, eurBar(list, cur, "estrazione"), ...head(t("Estrazione dei dati"), t("Claude estrae per primo, con la frase e la pagina del PDF; tu confermi, correggi o segni «non riportato», con il PDF accanto. Conferma in blocco solo per le frasi identiche al testo.")),
+    formBox, claudeBox, studiesBox, srcLine(data),
+    h("p", null, h("a", {href: "#/eurydike/estrazione?tutte=1"}, t("Tutte le schede degli articoli →"))));
+}
+async function eurExStudy(list, cur, sid) {
+  const view = liveView;
+  const rid = encodeURIComponent(cur.revisione.id);
+  let me = "";
+  try { me = localStorage.getItem("eurydike-revisore") || ""; } catch (e) { me = ""; }
+  const status = h("div", {class: "state-line", role: "status"});
+  const left = h("div", {class: "ex-left"}), headBox = h("div");
+  const frame = h("iframe", {title: t("PDF dello studio")});
+  let d = null, pdfUrl = null;
+  const showPage = (p) => { if (!pdfUrl) return; frame.src = `${pdfUrl}?p=${p || 1}#page=${p || 1}`; put(pageLbl, `p. ${p || 1}`); };
+  const pageLbl = h("span", {class: "muted"});
+  const pageLink = (p) => p ? h("button", {type: "button", class: "linklike", onclick: () => showPage(p), "aria-label": `${t("Mostra la pagina")} ${p}`}, `p. ${p}`) : "";
+  const load = async () => { d = await api(`/api/eurydike/revisioni/${rid}/estrazione/studio/${encodeURIComponent(sid)}${me ? `?revisore=${encodeURIComponent(me)}` : ""}`); draw(); };
+  const fail = (e) => put(status, h("span", {class: "error"}, e.message));
+  const ok = async (txt) => { clearCache(); await load(); put(status, tag(txt, "good")); };
+  const exWrite = (body) => postJson(`/api/eurydike/revisioni/${rid}/estrazione/valore`, {studio: sid, revisore: me || null, ...body});
+  const qcell = (x) => {
+    const [qt, qk] = QUOTE_TAG[x.controllo_citazione] || [x.controllo_citazione || "", ""];
+    return h("div", {class: "quote-cell"}, x.citazione ? h("q", {lang: "en"}, x.citazione) : h("span", {class: "muted"}, "—"),
+      h("div", null, pageLink(x.pagina), " ", x.citazione ? tag(t(qt), qk) : null));
+  };
+  function inputFor(x) {
+    if (x.tipo === "choice") return h("select", {name: "valore"}, h("option", {value: ""}, "—"), (x.opzioni || []).map((o) => h("option", {value: o, selected: x.valore === o ? true : null}, o)));
+    if (x.tipo === "bool") return h("select", {name: "valore"}, h("option", {value: ""}, "—"), [["si", t("sì")], ["no", "no"]].map(([k, l]) => h("option", {value: k, selected: x.valore === k ? true : null}, l)));
+    if (x.tipo === "multi") return h("div", {class: "ex-multi"}, (x.opzioni || []).map((o) => h("label", {class: "crit"}, h("input", {type: "checkbox", value: o, checked: (x.valore || []).includes(o) ? true : null}), h("span", null, o))));
+    if (x.tipo === "long") return h("textarea", {name: "valore", rows: "3", lang: "en"}, x.valore || "");
+    return h("input", {type: "text", name: "valore", lang: "en", value: x.valore === null ? "" : String(x.valore)});
+  }
+  function reviewEdit(x, tr) {
+    const inp = inputFor(x);
+    const q = h("textarea", {rows: "2", lang: "en"}, x.citazione || ""), pg = h("input", {type: "text", inputmode: "numeric", size: 4, value: x.pagina || ""}), nt = h("input", {type: "text"});
+    const err = h("p", {class: "error", role: "alert", hidden: true});
+    const extra = h("tr", {class: "row-extra"}, h("td", {colspan: 4}, h("form", {class: "edit-form", onsubmit: async (e) => {
+      e.preventDefault();
+      const valore = x.tipo === "multi" ? [...inp.querySelectorAll("input:checked")].map((c) => c.value) : inp.value;
+      try { await exWrite({azione: "correggi", campo: x.campo, valore, citazione: q.value, pagina: pg.value, nota: nt.value}); await ok(`${t("Corretto")}: ${x.etichetta}`); }
+      catch (er) { err.hidden = false; err.textContent = er.message; }
+    }}, field(t("Valore corretto"), inp), field(t("Frase dell'articolo (copiata dal PDF)"), q), field(t("Pagina"), pg), field(t("Nota"), nt), err,
+      h("div", {class: "action-row"}, h("button", {type: "submit", class: "btn primary"}, t("Salva la correzione")), " ",
+        h("button", {type: "button", class: "btn", onclick: () => extra.remove()}, t("Annulla"))))));
+    tr.after(extra);
+  }
+  function cardActions(x, isRow, tr) {
+    const aid = d.studio.articolo;
+    const key = isRow ? {esito: x.esito, gruppo: x.gruppo, tempo: x.tempo} : {campo: x.campo, ordine: x.ordine};
+    const label = isRow ? `${x.esito}, ${x.gruppo}, ${x.tempo}` : (FIELD[x.campo] || x.campo);
+    const w = (body, txt) => cardWrite(aid, {...key, ...body}).then(() => ok(txt), fail);
+    return h("div", {class: "card-actions"},
+      h("button", {type: "button", class: "btn small", disabled: (x.stato === "confirmed" || x.stato === "nr" || (!isRow && x.valore === null)) || null, onclick: () => w({azione: "conferma"}, `${t("Confermato")}: ${label}`)}, t("Conferma")),
+      h("button", {type: "button", class: "btn small", onclick: () => {
+        if (tr.nextElementSibling && tr.nextElementSibling.classList.contains("row-extra")) tr.nextElementSibling.remove();
+        const extra = h("tr", {class: "row-extra"}, h("td", {colspan: 4}, editForm(x, isRow, async (body) => { await cardWrite(aid, {azione: "correggi", ...key, ...body}); await ok(`${t("Corretto")}: ${label}`); }, () => extra.remove())));
+        tr.after(extra);
+      }}, t("Correggi")),
+      isRow ? null : h("button", {type: "button", class: "btn small", disabled: x.stato === "nr" || null, onclick: () => w({azione: "nr"}, `${t("Segnato non riportato")}: ${label}`)}, t("Non riportato")));
+  }
+  function draw() {
+    const s = d.studio;
+    pdfUrl = s.documento ? `/api/eurydike/documenti/${encodeURIComponent(s.documento)}/pdf` : null;
+    put(headBox, h("a", {class: "linklike", href: `#/eurydike/estrazione?r=${rid}`}, t("← Tutti gli studi")),
+      ...head(s.titolo, [s.autori, s.anno, s.rivista].filter(Boolean).join(" · ")),
+      h("div", {class: "action-row"}, h("button", {type: "button", class: "btn primary", disabled: d.esatte_da_confermare ? null : "",
+        onclick: () => postJson(`/api/eurydike/revisioni/${rid}/estrazione/conferma_esatte`, {studio: sid, revisore: me || null}).then((o) => ok(`${t("Confermati")}: ${fmtN(o.confermati)}`), fail)},
+        `${t("Conferma tutti quelli con la frase identica")} (${fmtN(d.esatte_da_confermare)})`)), status);
+    const kids = [];
+    const c = d.scheda;
+    if (!s.articolo) kids.push(h("p", {class: "notice"}, t("Lo studio non ha ancora un articolo in ORPHEUS: i campi della scheda arrivano dopo la verifica del DOI.")));
+    if (c) {
+      const tb = h("tbody");
+      for (const x of c.valori) {
+        const [st, sk] = STATE_TAG[x.stato] || [x.stato, ""];
+        const tr = h("tr", null, h("th", {scope: "row"}, t(FIELD[x.campo] || x.campo), x.ordine > 1 ? ` (${x.ordine})` : "", x.nome ? h("div", {class: "muted", lang: "en"}, x.nome) : null),
+          h("td", null, x.valore !== null ? h("b", {lang: "en"}, x.valore) : h("span", {class: "muted"}, "—"), x.unita ? ` ${x.unita}` : "", x.gruppo ? h("div", {class: "muted"}, x.gruppo) : null, h("div", null, tag(t(st), sk))),
+          h("td", null, qcell(x)));
+        tr.append(h("td", null, cardActions(x, false, tr)));
+        tb.append(tr);
+      }
+      for (const x of c.righe_esito) {
+        const [st, sk] = STATE_TAG[x.stato] || [x.stato, ""];
+        const nums = STATS_LABELS.filter(([k]) => x[k] !== null && x[k] !== undefined).map(([k, l]) => `${t(l)} ${x[k]}`).join(" · ");
+        const tr = h("tr", null, h("th", {scope: "row", lang: "en"}, x.esito, h("div", {class: "muted"}, `${x.gruppo} · ${x.tempo}`)),
+          h("td", null, h("b", null, nums || "—"), x.unita ? ` ${x.unita}` : "", h("div", null, tag(t(st), sk))), h("td", null, qcell(x)));
+        tr.append(h("td", null, cardActions(x, true, tr)));
+        tb.append(tr);
+      }
+      kids.push(h("h2", null, t("Campi della scheda")), c.mancanti.length ? h("p", {class: "muted"}, `${t("Ancora vuoti")}: ${c.mancanti.map((k) => t(FIELD[k] || k)).join(", ")}`) : null,
+        h("div", {class: "table-wrap"}, h("table", {class: "card-table"}, h("thead", null, h("tr", null, ["Campo", "Valore", "Frase e pagina", "Azione"].map((x) => h("th", {scope: "col"}, t(x))))), tb)));
+    }
+    if (d.valori_revisione.length) {
+      const tb = h("tbody");
+      for (const x of d.valori_revisione) {
+        const [st, sk] = EX_STATE[x.stato] || [x.stato, ""];
+        const tr = h("tr", null, h("th", {scope: "row", lang: "en"}, x.etichetta, x.unita ? h("span", {class: "muted"}, ` (${x.unita})`) : null),
+          h("td", null, x.valore !== null ? h("b", {lang: "en"}, exShow(x.valore)) : h("span", {class: "muted"}, "—"), h("div", null, tag(t(st), sk)),
+            x.claude ? h("div", {class: "muted"}, `${t("Claude")}: `, h("span", {lang: "en"}, exShow(x.claude.valore) || t("non riportato"))) : null,
+            x.nota ? h("div", {class: "muted", lang: "en"}, x.nota) : null),
+          h("td", null, qcell(x)));
+        tr.append(h("td", null, h("div", {class: "card-actions"},
+          h("button", {type: "button", class: "btn small", disabled: (x.stato !== "ai" || x.valore === null) || null,
+            onclick: () => exWrite({azione: "conferma", campo: x.campo}).then(() => ok(`${t("Confermato")}: ${x.etichetta}`), fail)}, t("Conferma")),
+          h("button", {type: "button", class: "btn small", onclick: () => reviewEdit(x, tr)}, t("Correggi")),
+          h("button", {type: "button", class: "btn small", disabled: x.stato === "nr" || null,
+            onclick: () => exWrite({azione: "nr", campo: x.campo}).then(() => ok(`${t("Segnato non riportato")}: ${x.etichetta}`), fail)}, t("Non riportato")))));
+        tb.append(tr);
+      }
+      kids.push(h("h2", null, t("Campi della revisione")), h("div", {class: "table-wrap"}, h("table", {class: "card-table"},
+        h("thead", null, h("tr", null, ["Campo", "Valore", "Frase e pagina", "Azione"].map((x) => h("th", {scope: "col"}, t(x))))), tb)));
+    }
+    if (!c && !d.valori_revisione.length) kids.push(h("p", {class: "empty"}, t("Nessun valore ancora: blocca il modulo e prepara i pacchetti per Claude.")));
+    put(left, ...kids);
+  }
+  await load();
+  const right = pdfUrl ? h("aside", {class: "ex-pdf", "aria-label": t("PDF dello studio")}, h("div", {class: "action-row"}, pageLbl,
+      h("a", {class: "btn small", href: pdfUrl, target: "_blank", rel: "noopener"}, t("Apri il PDF in una scheda"))), frame)
+    : h("aside", {class: "ex-pdf"}, h("p", {class: "notice"}, t("Manca il PDF dello studio (Full text → «Leggi i PDF nuovi»).")));
+  const first = [...(d.scheda ? d.scheda.valori : []), ...d.valori_revisione].find((x) => x.pagina);
+  showPage(first ? first.pagina : 1);
+  put(view, eurBar(list, cur, "estrazione"), headBox, h("div", {class: "ex-grid"}, h("section", {class: "block"}, left), right),
+    h("p", {class: "src"}, t("Ogni modifica è una riga nuova: niente si cancella. I campi della scheda valgono per l'articolo anche in ORPHEUS.")), srcLine(d));
 }
 function judgementTag(j) {
   const cls = {low: "good", some: "warn", moderate: "warn", unclear: "warn", high: "crit", serious: "crit", critical: "crit"}[j] || "";
   const it = {low: "basso", some: "alcune preoccupazioni", moderate: "moderato", unclear: "non chiaro", high: "alto", serious: "serio", critical: "critico"}[j] || j;
   return tag(t(it), cls);
 }
-function eurBias(list, cur) {
-  const b = cur.bias;
-  const robCell = (x) => {
-    if (!x) return tag(t("strumento da scegliere"), "warn");
-    const sug = x.suggerito;
-    return h("div", null, h("b", null, x.nome), h("div", {class: "muted"}, `${fmtN(x.giudicate)} / ${fmtN(x.voci)} ${t("domini giudicati")}`),
-      sug ? (sug.stars !== undefined ? tag(`${sug.stars}/${sug.max} ★`) : sug.j ? [t("suggerito"), ": ", judgementTag(sug.j), sug.partial ? h("span", {class: "muted"}, ` (${t("parziale")})`) : null, sug.note ? h("div", {class: "muted"}, sug.note) : null] : tag(t("solo 'nessuna informazione'"))) : null);
+/* EURYDIKE E7 · Rischio di bias e qualità (2026-11-03: «Proposto dal disegno», «Claude, tu confermi», «Tutti e due»,
+   PDF «Come in E6»). Board: tools of every study (proposed, chosen), Claude's packets; a study opens with the items on
+   the left and the PDF on the right. The overall risk of bias is a computed suggestion; the final one is the user's. */
+const RB_STATE = {ai: ["da controllare", "warn"], confirmed: ["confermato", "good"], edited: ["cambiato da te", "acc"], vuoto: ["da giudicare", ""]};
+function rbScore(q) {
+  if (!q) return "";
+  return q.empty ? t("non valutato") : q.kind === "points" ? `${q.pts}/${q.max} (${String(q.pct).replace(".", ",")}%) ${t(q.band || "")}` : q.kind === "count" ? `${q.yes}/${q.applicable} ${t("sì")}` : t(q.label);
+}
+function rbSuggested(sug) {
+  if (!sug) return h("span", {class: "muted"}, "—");
+  if (sug.stars !== undefined) return tag(`${sug.stars}/${sug.max} ★`);
+  if (!sug.j) return tag(t("solo 'nessuna informazione'"));
+  return h("span", null, judgementTag(sug.j), sug.partial ? h("span", {class: "muted"}, ` (${t("parziale")})`) : null, sug.note ? h("div", {class: "muted"}, t(sug.note)) : null);
+}
+async function eurBias(list, cur) {
+  const rid = encodeURIComponent(cur.revisione.id);
+  let me = "";
+  try { me = localStorage.getItem("eurydike-revisore") || ""; } catch (e) { me = ""; }
+  const claudeBox = h("section", {class: "block", "aria-labelledby": "h-rbclaude"});
+  const studiesBox = h("section", {class: "block", "aria-labelledby": "h-rbstudi"});
+  let data = null;
+  const load = async () => { data = await api(`/api/eurydike/revisioni/${rid}/bias${me ? `?revisore=${encodeURIComponent(me)}` : ""}`); drawClaude(); drawStudies(); };
+  const act = (azione, body, done) => async (e) => {
+    const b = e && e.currentTarget; if (b) b.disabled = true;
+    try { const out = await postJson(`/api/eurydike/revisioni/${rid}/bias/${azione}`, {revisore: me || null, ...(body ? body() : {})}); clearCache(); await load(); if (done) done(out); }
+    catch (err) { alert(err.message); }
+    if (b) b.disabled = false;
   };
-  const qualCell = (x) => {
-    if (!x) return h("span", {class: "muted"}, "—");
-    const p = x.punteggio;
-    const txt = !p ? "" : p.empty ? t("non valutato") : p.kind === "points" ? `${p.pts}/${p.max} (${String(p.pct).replace(".", ",")}%) ${p.band || ""}` : p.kind === "count" ? `${p.yes}/${p.applicable} ${t("sì")}` : p.label;
-    return h("div", null, h("b", null, x.nome), h("div", {class: "muted"}, `${fmtN(x.giudicate)} / ${fmtN(x.voci)} ${t("voci")}`), txt ? tag(txt) : null);
-  };
-  return [eurBar(list, cur, "bias"), ...head(t("Rischio di bias"), t("Uno strumento per studio (10 strumenti, uguali a Tabula v19). Il giudizio complessivo qui è solo un suggerimento calcolato: quello finale lo scrivi tu.")),
-    b.studi.length ? h("div", {class: "table-wrap"}, h("table", null,
-      h("thead", null, h("tr", null, h("th", {scope: "col"}, t("Studio")), h("th", {scope: "col"}, t("Rischio di bias")), h("th", {scope: "col"}, t("Qualità")))),
-      h("tbody", null, b.studi.map((x) => h("tr", null, h("td", null, h("b", null, x.studio), h("div", null, articleLink(x.articolo))), h("td", null, robCell(x.rob)), h("td", null, qualCell(x.qualita)))))))
-      : h("p", {class: "empty"}, t("Nessuno studio incluso al full text.")), srcLine(b)];
+  const toolName = (kind, key) => key === "none" ? t("nessuna") : ((data.catalogo[kind] || []).find((x) => x.key === key) || {nome: key}).nome;
+  function drawClaude() {
+    const c = data.claude, k = data.conteggi;
+    const msg = h("p", {role: "status", class: "muted"});
+    const n = h("input", {type: "number", min: "1", max: "40", value: "5", class: "num-in", "aria-label": t("Pacchetti da preparare")});
+    put(claudeBox, h("div", {class: "block-head"}, h("h2", {id: "h-rbclaude"}, t("Strumenti e giudizi di Claude")),
+        h("span", {class: "muted"}, `${fmtN(k.inclusi)} ${t("studi inclusi")} · ${fmtN(c.pacchetti_aperti)} ${t("pacchetti aperti")} · ${fmtN(c.da_giudicare)} ${t("da giudicare")}`)),
+      h("p", {class: "muted"}, t("1. Gli strumenti sono proposti dal disegno dello studio (scheda) o dal protocollo: accettali o cambiali nella tabella. 2. Claude giudica ogni voce con il motivo, la frase e la pagina. 3. Tu confermi o cambi, con il PDF accanto. Cartella:"), " ", h("code", null, data.cartella)),
+      h("div", {class: "action-row"},
+        h("button", {type: "button", class: "btn" + (k.senza_strumenti ? " primary" : ""), onclick: act("usa_proposte", null, (o) => put(msg, tag(`${t("Strumenti scelti")}: ${fmtN(o.scelti)}`, "good")))}, t("Usa le proposte per tutti")),
+        h("label", {class: "ft-n"}, h("span", null, t("Pacchetti (1 studio)")), n),
+        h("button", {type: "button", class: "btn", onclick: act("pacchetti", () => ({quanti: Number(n.value) || 5}), (o) => put(msg, tag(`${t("Pacchetti aperti")}: ${fmtN(o.aperti.length)}. ${t("Chiedi a Claude di leggerli.")}`, "good")))}, t("Prepara i pacchetti per Claude")),
+        h("button", {type: "button", class: "btn", onclick: act("risposte", null, (o) => put(msg, tag(`${t("Risposte di Claude")}: ${fmtN(o.accettate)} ${t("accettate")}, ${fmtN(o.rifiutate)} ${t("rifiutate")}`, o.rifiutate ? "warn" : "good")))}, t("Leggi le risposte di Claude"))),
+      msg);
+  }
+  function toolSelect(r, kind) {
+    const cat = data.catalogo[kind];
+    const current = r.scelti[kind];
+    const prop = r.proposta[kind] || (kind === "quality" ? "none" : "");
+    const sel = h("select", {"aria-label": `${t(kind === "rob" ? "Rischio di bias" : "Qualità")}: ${r.titolo}`, onchange: act("strumento", () => ({studio: r.id, tipo: kind, strumento: sel.value}))},
+      current ? null : h("option", {value: ""}, `${t("proposto")}: ${prop ? toolName(kind, prop) : "—"}`),
+      cat.map((x) => h("option", {value: x.key, selected: current === x.key ? true : null}, x.nome)),
+      h("option", {value: "none", selected: current === "none" ? true : null}, t("nessuno")));
+    return h("div", null, sel, current ? null : h("div", null, tag(t("da scegliere"), "warn")));
+  }
+  function drawStudies() {
+    const rows = data.studi;
+    const open = (r) => go(`eurydike/bias?r=${rid}&s=${encodeURIComponent(r.id)}`);
+    put(studiesBox, h("div", {class: "block-head"}, h("h2", {id: "h-rbstudi"}, t("Studi inclusi")), h("span", {class: "muted"}, `${fmtN(data.conteggi.da_controllare)} ${t("giudizi da controllare")}`)),
+      rows.length ? h("div", {class: "table-wrap"}, h("table", null,
+        h("thead", null, h("tr", null, ["Studio", "Rischio di bias", "Qualità", "Giudizio", ""].map((x) => h("th", {scope: "col"}, t(x))))),
+        h("tbody", null, rows.map((r) => h("tr", null,
+          h("td", null, h("a", {href: `#/eurydike/bias?r=${rid}&s=${encodeURIComponent(r.id)}`, lang: "en"}, r.titolo), r.anno ? h("span", {class: "muted"}, ` · ${r.anno}`) : null,
+            h("div", {class: "muted"}, t(r.proposta.perche))),
+          h("td", null, toolSelect(r, "rob")), h("td", null, toolSelect(r, "quality")),
+          h("td", null, r.rob ? h("div", null, r.rob.complessivo ? [t("tuo"), ": ", judgementTag(r.rob.complessivo)] : [t("suggerito"), ": ", rbSuggested(r.rob.suggerito)],
+              h("div", {class: "muted"}, `${fmtN(r.rob.giudicate)}/${fmtN(r.rob.totale)} ${t("domini")}`)) : null,
+            r.qualita ? h("div", null, tag(rbScore(r.qualita.punteggio) || t("non valutato"))) : null),
+          h("td", null, h("button", {type: "button", class: "btn small", disabled: r.pdf ? null : "", onclick: () => open(r)}, t("Apri"))))))))
+        : h("p", {class: "empty"}, t("Nessuno studio incluso al full text.")));
+  }
+  await load();
+  return [eurBar(list, cur, "bias"), ...head(t("Rischio di bias e qualità"), t("Uno strumento di rischio di bias e una scala di qualità per studio (uguali a Tabula v19). Claude giudica per primo con frase e pagina; tu confermi o cambi. Il giudizio complessivo calcolato è solo un suggerimento: quello finale lo scrivi tu.")),
+    claudeBox, studiesBox, srcLine(data)];
+}
+async function eurBiasStudy(list, cur, sid) {
+  const view = liveView;
+  const rid = encodeURIComponent(cur.revisione.id);
+  let me = "";
+  try { me = localStorage.getItem("eurydike-revisore") || ""; } catch (e) { me = ""; }
+  const status = h("div", {class: "state-line", role: "status"});
+  const left = h("div"), headBox = h("div"), pageLbl = h("span", {class: "muted"});
+  const frame = h("iframe", {title: t("PDF dello studio")});
+  let d = null, pdfUrl = null;
+  const showPage = (p) => { if (!pdfUrl) return; frame.src = `${pdfUrl}?p=${p || 1}#page=${p || 1}`; put(pageLbl, `p. ${p || 1}`); };
+  const pageLink = (p) => p ? h("button", {type: "button", class: "linklike", onclick: () => showPage(p), "aria-label": `${t("Mostra la pagina")} ${p}`}, `p. ${p}`) : "";
+  const load = async () => { d = await api(`/api/eurydike/revisioni/${rid}/bias/studio/${encodeURIComponent(sid)}${me ? `?revisore=${encodeURIComponent(me)}` : ""}`); draw(); };
+  const fail = (e) => put(status, h("span", {class: "error"}, e.message));
+  const ok = async (txt) => { clearCache(); await load(); put(status, tag(txt, "good")); };
+  const write = (body) => postJson(`/api/eurydike/revisioni/${rid}/bias/giudizio`, {studio: sid, revisore: me || null, ...body});
+  function itemRow(s, x) {
+    const [st, sk] = RB_STATE[x.stato] || [x.stato, ""];
+    const [qt, qk] = QUOTE_TAG[x.controllo_citazione] || ["", ""];
+    const lab = (code) => t((x.scala.find((c) => c.codice === code) || {etichetta: code}).etichetta);
+    const why = h("input", {type: "text", lang: "en", placeholder: t("Motivo (in inglese, facoltativo)"), "aria-label": `${t("Motivo")}: ${x.testo}`});
+    const btns = x.scala.map((c) => h("button", {type: "button", class: "btn small", "aria-pressed": String(x.giudizio === c.codice && x.stato !== "ai" && x.stato !== "vuoto"),
+      onclick: () => write({strumento: s.strumento, voce: x.voce, giudizio: c.codice, motivo: why.value}).then(() => ok(`${x.voce}: ${t(c.etichetta)}`), fail)},
+      x.giudizio === c.codice && x.stato === "ai" ? "✓ " : "", t(c.etichetta)));
+    return h("li", {class: "rb-item"},
+      h("div", {class: "rb-q"}, h("b", null, x.voce), " ", t(x.testo), x.aiuto ? h("div", {class: "muted"}, t(x.aiuto)) : null),
+      h("div", {class: "rb-a"}, x.giudizio ? h("b", null, lab(x.giudizio)) : h("span", {class: "muted"}, "—"), " ", tag(t(st), sk),
+        x.claude ? h("span", {class: "muted"}, ` · ${t("Claude")}: ${lab(x.claude.giudizio)}`) : null,
+        x.motivo ? h("div", {class: "muted", lang: "en"}, x.motivo) : null,
+        x.citazione ? h("div", {class: "quote-cell"}, h("q", {lang: "en"}, x.citazione), " ", pageLink(x.pagina), " ", tag(t(qt), qk)) : null),
+      h("div", {class: "action-row rb-judge"}, btns, why));
+  }
+  function draw() {
+    const s0 = d.studio;
+    pdfUrl = s0.documento ? `/api/eurydike/documenti/${encodeURIComponent(s0.documento)}/pdf` : null;
+    put(headBox, h("a", {class: "linklike", href: `#/eurydike/bias?r=${rid}`}, t("← Tutti gli studi")),
+      ...head(s0.titolo, [s0.autori, s0.anno, s0.rivista].filter(Boolean).join(" · ")),
+      h("div", {class: "action-row"}, h("button", {type: "button", class: "btn primary", disabled: d.esatte_da_confermare ? null : "",
+        onclick: () => postJson(`/api/eurydike/revisioni/${rid}/bias/conferma_esatte`, {studio: sid, revisore: me || null}).then((o) => ok(`${t("Confermati")}: ${fmtN(o.confermati)}`), fail)},
+        `${t("Conferma tutti quelli con la frase identica")} (${fmtN(d.esatte_da_confermare)})`)), status);
+    const kids = [];
+    if (!d.strumenti.length) kids.push(h("p", {class: "empty"}, t("Nessuno strumento scelto: sceglilo nella tabella degli studi.")));
+    for (const s of [...d.strumenti].sort((p, q) => (p.tipo === "rob" ? 0 : 1) - (q.tipo === "rob" ? 0 : 1))) {
+      const tb = h("ol", {class: "rb-items"});
+      let sec = null;
+      for (const x of s.voci) {
+        if (x.sezione && x.sezione !== sec) { sec = x.sezione; tb.append(h("li", {class: "rb-sec"}, t(sec))); }
+        tb.append(itemRow(s, x));
+      }
+      const summary = s.tipo === "rob"
+        ? h("div", {class: "rb-sum"}, h("span", null, `${t("Suggerito (calcolato)")}: `), rbSuggested(s.suggerito),
+          s.complessivo ? h("div", {class: "action-row"}, h("span", null, `${t("Il tuo giudizio complessivo")}: `),
+            s.complessivo.scala.map((c) => h("button", {type: "button", class: "btn small", "aria-pressed": String(s.complessivo.giudizio === c.codice),
+              onclick: () => write({strumento: s.strumento, voce: "_overall", giudizio: c.codice}).then(() => ok(`${t("Complessivo")}: ${t(c.etichetta)}`), fail)}, t(c.etichetta)))) : null)
+        : h("div", {class: "rb-sum"}, `${t("Punteggio (calcolato)")}: `, tag(rbScore(s.punteggio) || t("non valutato")));
+      kids.push(h("h2", null, `${t(s.tipo === "rob" ? "Rischio di bias" : "Qualità")} · ${s.nome}`), s.uso ? h("p", {class: "muted"}, t(s.uso)) : null,
+        `${fmtN(s.giudicate)}/${fmtN(s.totale)} ${t("voci giudicate")}`, summary,
+        tb);
+    }
+    put(left, ...kids);
+  }
+  await load();
+  const right = pdfUrl ? h("aside", {class: "ex-pdf", "aria-label": t("PDF dello studio")}, h("div", {class: "action-row"}, pageLbl,
+      h("a", {class: "btn small", href: pdfUrl, target: "_blank", rel: "noopener"}, t("Apri il PDF in una scheda"))), frame)
+    : h("aside", {class: "ex-pdf"}, h("p", {class: "notice"}, t("Manca il PDF dello studio (Full text → «Leggi i PDF nuovi»).")));
+  const first = d.strumenti.flatMap((s) => s.voci).find((x) => x.pagina);
+  showPage(first ? first.pagina : 1);
+  put(view, eurBar(list, cur, "bias"), headBox, h("div", {class: "ex-grid"}, h("section", {class: "block"}, left), right),
+    h("p", {class: "src"}, t("Ogni giudizio è una riga nuova: niente si cancella. I punteggi e il giudizio suggerito sono calcolati da ORPHEUS.")), srcLine(d));
+}
+function consensusButtons(cur, r) {
+  /* T-051e: the consensus on a conflict, written by the user (it prevails on the reviewers' decisions) */
+  const crits = (cur.protocollo && cur.protocollo.criteri ? cur.protocollo.criteri : []).filter((c) => c.tipo === "exclusion" && !c.sostituito_da);
+  const sel = h("select", {"aria-label": t("Criterio di esclusione")}, h("option", {value: ""}, t("criterio…")),
+    crits.map((c) => h("option", {value: c.id}, `E${c.ordine || c.ord} — ${(c.testo || c.text || "").slice(0, 60)}`)));
+  const msg = h("span", {class: "muted", role: "status"});
+  const go_ = (decisione) => postJson(`/api/eurydike/revisioni/${encodeURIComponent(cur.revisione.id)}/decisione`,
+    {record: r.id, decisione, criterio: decisione === "exclude" ? sel.value || null : null, consenso: true})
+    .then(() => { clearCache(); route(); }, (e) => put(msg, h("span", {class: "error"}, e.message)));
+  return h("div", {class: "action-row"}, h("b", null, `${t("Consenso")}: `),
+    h("button", {type: "button", class: "btn small", onclick: () => go_("include")}, t("Includi")), " ",
+    h("button", {type: "button", class: "btn small", onclick: () => go_("exclude")}, t("Escludi")), " ", sel, " ",
+    h("button", {type: "button", class: "btn small", onclick: () => go_("maybe")}, t("Forse")), " ", msg);
 }
 function eurConsensus(list, cur) {
   const c = cur.consenso;
@@ -2536,7 +3365,7 @@ function eurConsensus(list, cur) {
         h("thead", null, h("tr", null, h("th", {scope: "col"}, t("Record")), h("th", {scope: "col"}, t("Decisioni e motivi")))),
         h("tbody", null, c.conflitti.map((r) => h("tr", null, h("td", null, recordCell(r)),
           h("td", null, r.decisioni.map((d) => h("div", null, h("b", null, `${d.revisore}: `), tag(t((EUR_DEC[d.decisione] || [d.decisione])[0]), (EUR_DEC[d.decisione] || ["", ""])[1]),
-            d.criterio ? ` E${d.criterio}` : "", d.motivo ? h("span", {class: "muted", lang: "en"}, ` — ${d.motivo}`) : null))))))))
+            d.criterio ? ` E${d.criterio}` : "", d.motivo ? h("span", {class: "muted", lang: "en"}, ` — ${d.motivo}`) : null)), consensusButtons(cur, r)))))))
         : h("p", null, tag(t("nessun conflitto"), "good"))),
     h("section", {class: "block"}, h("h2", null, `${t("Full text: Claude diverso da te")} (${fmtN(c.full_text_diversi.length)})`),
       c.full_text_diversi.length ? h("ul", {class: "notes"}, c.full_text_diversi.map((x) => h("li", null, h("b", null, x.studio), ": ",
@@ -2661,6 +3490,92 @@ async function eurNewForm() {
     ...head(t("Nuova revisione"), t("Il protocollo: domanda, PICOS, criteri, registrazione, strategia di ricerca e strumenti predefiniti.")), form);
   setTimeout(() => f.titolo.focus(), 0);
 }
+function dupCheckBlock(cur) {
+  const n = (cur.da_fare || {}).doppioni || 0;
+  return h("section", {class: "block", "aria-labelledby": "h-dupcheck"},
+    h("div", {class: "block-head"}, h("h2", {id: "h-dupcheck"}, t("Duplicati")),
+      h("a", {class: "btn" + (n ? " primary" : ""), href: "#/eurydike/doppioni"}, t("Apri il confronto"))),
+    h("p", {class: "muted"}, n ? `${fmtN(n)} ${t("coppie da guardare: confermale o scartale una per una, i due record affiancati.")}`
+      : t("Nessuna coppia proposta da guardare. I duplicati trovati all'importazione si possono controllare nel confronto.")));
+}
+/* EURYDIKE · Doppioni (2026-11-03, "come in Rayyan"): the two records side by side, the differences marked;
+   "Duplicato: tieni questo" under each record, "Non sono duplicati" in the middle. CSV for many pairs at once. */
+const DUP_STATES = [["da_decidere", "Da decidere"], ["confermati", "Confermati"], ["scartati", "Scartati"]];
+const DUP_KINDS = [["", "Tutti"], ["proposto", "Proposti"], ["possibile", "Possibili"], ["trovato", "Trovati all'importazione"]];
+const DUP_KIND_TAG = {trovato: ["trovato all'importazione", ""], proposto: ["proposto", "warn"], possibile: ["possibile", "crit"], deciso: ["deciso a mano", "acc"]};
+const DUP_REASON = {doi: "stesso DOI", pmid: "stesso PMID", titolo: "stesso titolo e anno", "titolo, anno diverso": "stesso titolo, anno diverso",
+  "titolo, DOI o PMID diversi": "stesso titolo, DOI o PMID diversi", "deciso a mano": "deciso a mano"};
+const dupState = {stato: "da_decidere", tipo: ""};
+const DUP_FIELDS = [["fonte", "Fonte"], ["titolo", "Titolo"], ["autori", "Autori"], ["anno", "Anno"], ["rivista", "Rivista"], ["doi", "DOI"], ["pmid", "PMID"]];
+const dupNorm = (k, v) => String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, "");
+async function eurDuplicates(list, cur) {
+  const rid = encodeURIComponent(cur.revisione.id);
+  const holder = h("div"), msg = h("p", {role: "status", class: "notice dup-msg", hidden: ""}), top = h("div", {class: "dup-top"});
+  let shown = [];
+  const say = (text) => { msg.hidden = !text; msg.textContent = text || ""; };
+  const send = async (row, doppione, tieni, card) => {
+    for (const b of card.querySelectorAll("button")) b.disabled = true;
+    try {
+      const out = await postJson(`/api/eurydike/revisioni/${rid}/doppioni/decisione`, {record: row.record.id, altro: row.originale.id, doppione, tieni});
+      clearCache();
+      say(doppione === "S" ? `${t("Confermato duplicato")}: ${t("tenuto")} «${(tieni === row.record.id ? row.record : row.originale).titolo.slice(0, 80)}»`
+        : t("Segnati come articoli diversi: non verranno più proposti."));
+      shown = shown.filter((x) => x !== row); card.remove();
+      header(out);
+      if (!shown.length) load(0);
+    } catch (e) { say(e.message); for (const b of card.querySelectorAll("button")) b.disabled = false; }
+  };
+  const side = (row, which, other) => {
+    const r = row[which], o = row[other];
+    return h("div", {class: "dup-side"},
+      h("dl", {class: "kv"}, DUP_FIELDS.map(([k, l]) => {
+        const v = k === "fonte" ? `${r.fonte}${r.banca_dati ? " · " + r.banca_dati : ""}` : r[k];
+        const differ = k !== "fonte" && dupNorm(k, r[k]) !== dupNorm(k, o[k]);
+        return [h("dt", null, t(l)), h("dd", {lang: k === "titolo" || k === "autori" ? "en" : null, class: differ ? "dup-diff" : null},
+          v ? String(v) : "—", differ ? h("span", {class: "sr-only"}, ` (${t("diverso")})`) : null)];
+      })),
+      r.abstract ? h("details", null, h("summary", null, t("Abstract")), h("p", {lang: "en"}, r.abstract)) : null,
+      row.stato === "" || row.stato === "N" ? h("button", {type: "button", class: "btn primary", onclick: (e) => send(row, "S", r.id, e.currentTarget.closest(".dup-card"))},
+        t("Duplicato: tieni questo")) : (r.doppione_di ? tag(t("duplicato"), "") : tag(t("tenuto"), "good")));
+  };
+  const card = (row) => {
+    const [k, kk] = DUP_KIND_TAG[row.tipo] || [row.tipo, ""];
+    return h("article", {class: "block dup-card", tabindex: "-1"},
+      h("div", {class: "dup-head"}, tag(t(k), kk), " ", h("span", {class: "muted"}, `${t(DUP_REASON[row.motivo] || row.motivo)} · ${t("titoli simili al")} ${row.somiglianza}%`),
+        row.stato === "S" ? tag(t("confermato"), "good") : row.stato === "N" ? tag(t("articoli diversi"), "acc") : null),
+      h("div", {class: "dup-pair"}, side(row, "record", "originale"), side(row, "originale", "record")),
+      row.stato !== "N" ? h("div", {class: "action-row"}, h("button", {type: "button", class: "btn", onclick: (e) => send(row, "N", null, e.currentTarget.closest(".dup-card"))},
+        t("Non sono duplicati"))) : null);
+  };
+  const header = (d) => {
+    const st = d.per_stato || {}, ty = d.per_tipo || {};
+    put(top,
+      h("div", {class: "checks", role: "group", "aria-label": t("Stato")}, DUP_STATES.map(([k, l]) => h("button", {type: "button", class: "chip", "aria-pressed": String(dupState.stato === k),
+        onclick: () => { dupState.stato = k; load(0); }}, t(l), h("span", {class: "muted"}, ` ${fmtN(st[k] || 0)}`)))),
+      h("div", {class: "checks", role: "group", "aria-label": t("Tipo")}, DUP_KINDS.map(([k, l]) => h("button", {type: "button", class: "chip", "aria-pressed": String(dupState.tipo === k),
+        onclick: () => { dupState.tipo = k; load(0); }}, t(l), k ? h("span", {class: "muted"}, ` ${fmtN(ty[k] || 0)}`) : null))),
+      d.trovati_per_doi_da_decidere ? h("div", {class: "action-row"}, h("button", {type: "button", class: "btn", onclick: async (e) => {
+        if (!confirm(`${t("Confermare in una volta tutti i duplicati trovati con lo stesso DOI?")} (${fmtN(d.trovati_per_doi_da_decidere)})`)) return;
+        e.currentTarget.disabled = true;
+        try { const out = await postJson(`/api/eurydike/revisioni/${rid}/doppioni/conferma_trovati`, {motivo: "doi"}); clearCache();
+          say(`${t("Confermati")}: ${fmtN(out.confermati)}`); load(0); } catch (err) { say(err.message); e.currentTarget.disabled = false; }
+      }}, `${t("Conferma tutti i trovati con lo stesso DOI")} (${fmtN(d.trovati_per_doi_da_decidere)})`),
+        h("span", {class: "muted"}, t("Lo stesso DOI è lo stesso articolo; guarda prima i proposti e i possibili."))) : null);
+  };
+  const load = async (from) => {
+    const qs = new URLSearchParams({stato: dupState.stato, tipo: dupState.tipo, da: String(from), quanti: "20"});
+    const d = await api(`/api/eurydike/revisioni/${rid}/doppioni?${qs}`);
+    shown = from ? shown.concat(d.righe) : d.righe.slice();
+    header(d);
+    put(holder, shown.length ? h("div", null, shown.map(card)) : h("p", {class: "empty"}, dupState.stato === "da_decidere" ? t("Nessuna coppia da decidere con questo filtro.") : t("Nessuna coppia.")),
+      h("p", {class: "muted"}, `${fmtN(shown.length)} ${t("di")} ${fmtN(d.totale)} ${t("coppie")}`),
+      shown.length < d.totale ? h("button", {type: "button", class: "btn", onclick: () => load(shown.length)}, t("Mostra altre 20")) : null);
+    return d;
+  };
+  const d0 = await load(0);
+  return [eurBar(list, cur, "doppioni"), ...head(t("Duplicati"), t("Le coppie di record che potrebbero essere lo stesso articolo, affiancate: le differenze sono evidenziate. «Duplicato: tieni questo» lascia nello screening il record scelto; «Non sono duplicati» li tiene tutti e due. Nessun record viene cancellato.")),
+    top, msg, holder, h("p", {class: "src"}, d0.fonte || "")];
+}
 function searchBlock(cur) {
   const box = h("section", {class: "block", "aria-labelledby": "h-search"});
   const fill = async () => {
@@ -2669,10 +3584,24 @@ function searchBlock(cur) {
     catch (e) { put(box, h("h2", {id: "h-search"}, t("File della ricerca")), h("p", {class: "error"}, e.message)); return; }
     const fresh = d.file.filter((x) => x.stato === "nuovo");
     const msg = h("p", {role: "status", class: "muted"});
+    const pathIn = h("input", {type: "text", placeholder: "C:\\Users\\…\\ricerca", "aria-label": t("Percorso completo della cartella")});
+    const pickFolder = async (body) => {
+      msg.textContent = body.percorso || body.predefinita ? "" : t("Scegli la cartella nella finestra che si apre…");
+      try { const r = await postJson(`/api/eurydike/revisioni/${encodeURIComponent(cur.revisione.id)}/cartella_ricerca`, body);
+        if (r.annullato) { msg.textContent = t("Nessuna cartella scelta."); return; } clearCache(); fill(); }
+      catch (err) { msg.textContent = err.message; }
+    };
     const STATO = {nuovo: ["da importare", "warn"], importato: ["importato", "good"], "non leggibile": ["non leggibile", "crit"]};
     put(box, h("div", {class: "block-head"}, h("h2", {id: "h-search"}, t("File della ricerca")),
         h("button", {type: "button", class: "btn", onclick: fill}, t("Aggiorna"))),
-      h("p", {class: "muted"}, t("Esporta la ricerca da ogni banca dati (RIS, PubMed .nbib, Web of Science, CSV) e mettila in questa cartella:"), " ", h("code", null, d.cartella)),
+      h("p", {class: "muted"}, t("Esporta la ricerca da ogni banca dati (RIS, PubMed .nbib, Web of Science, CSV) e mettila in questa cartella:"), " ", h("code", null, d.cartella),
+        d.scelta ? [" ", tag(t("scelta da te"), "acc")] : null),
+      h("div", {class: "action-row"},
+        h("button", {type: "button", class: "btn", onclick: () => pickFolder({})}, t("Scegli cartella")),
+        h("details", {class: "action-more"}, h("summary", null, t("oppure incolla il percorso")),
+          h("form", {class: "inline-form", onsubmit: (e) => { e.preventDefault(); if (pathIn.value.trim()) pickFolder({percorso: pathIn.value.trim()}); }},
+            pathIn, h("button", {type: "submit", class: "btn"}, t("Usa questa cartella")))),
+        d.scelta ? h("button", {type: "button", class: "btn small", onclick: () => pickFolder({predefinita: true})}, t("Torna alla cartella della revisione")) : null),
       d.file.length ? h("div", {class: "table-wrap"}, h("table", null,
         h("thead", null, h("tr", null, ["File", "Banca dati", "Formato", "Record", "Stato"].map((x, i) => h("th", {scope: "col", class: i === 3 ? "n" : null}, t(x))))),
         h("tbody", null, d.file.map((x) => { const [st, k] = STATO[x.stato] || [x.stato, ""];
@@ -2685,12 +3614,12 @@ function searchBlock(cur) {
         try {
           const out = await postJson(`/api/eurydike/revisioni/${encodeURIComponent(cur.revisione.id)}/importa`);
           clearCache();
-          const lines = out.importati.map((x) => `${x.file}: ${fmtN(x.record)} record, ${fmtN(x.doppioni)} ${t("doppioni")}`).join(" · ");
+          const lines = out.importati.map((x) => `${x.file}: ${fmtN(x.record)} record, ${fmtN(x.doppioni)} ${t("duplicati")}`).join(" · ");
           try { sessionStorage.setItem("eurydike-import", lines); } catch (x) { /* */ }
           route();
         } catch (err) { msg.textContent = err.message; e.currentTarget.disabled = false; }
       }}, `${t("Importa i file nuovi")} (${fresh.length})`)) : null, msg,
-      h("p", {class: "src"}, t("Ogni record resta; un doppione (stesso DOI, PMID o titolo e anno) punta al primo. Lo stesso file non si importa due volte.")));
+      null);
     let last = null;
     try { last = sessionStorage.getItem("eurydike-import"); sessionStorage.removeItem("eurydike-import"); } catch (x) { last = null; }
     if (last) box.insertBefore(h("p", {class: "notice", role: "status"}, `${t("Importati")}: ${last}`), box.children[1]);
@@ -2705,12 +3634,15 @@ async function eurydikeSection(sub) {
   if (sub === "nuova") return eurNewForm();
   const {list, cur} = await eurLoad();
   if (sub === "estrazione") {
-    const aid = hashParam("a");
+    const aid = hashParam("a"), sid = hashParam("s");
     if (aid) return cardDetail(aid);
+    if (sid && cur) return eurExStudy(list, cur, sid);
+    if (hashParam("tutte")) return cardsList();
     return eurExtraction(list, cur);
   }
+  if (sub === "bias" && cur && hashParam("s")) return eurBiasStudy(list, cur, hashParam("s"));
   if (!cur) { put(view, ...eurEmpty(EUR_TITLES[sub] ? sub : "panoramica")); return; }
-  const fn = {protocollo: eurProtocol, screening: eurScreening, fulltext: eurFulltext, bias: eurBias, consenso: eurConsensus,
+  const fn = {protocollo: eurProtocol, doppioni: eurDuplicates, screening: eurScreening, fulltext: eurFulltext, bias: eurBias, consenso: eurConsensus,
     meta: eurMeta, esporta: eurExport}[sub] || eurOverview;
   put(view, ...(await fn(list, cur)));
 }
@@ -2761,14 +3693,14 @@ api("/api/lavora/uscita?da=999999999").then((snap) => { updateBadge(snap); if (s
 Promise.all([
   api("/api/sigle").then((x) => { setJournals(x.sigle, x.articoli); journalNames = new Map(Object.entries(x.titoli || {})); }).catch(() => {}),
   api("/api/testi").then((x) => { setOverrides(x.testi); textsFile = x.file; }).catch(() => {}),
-  api("/api/aspetto").then((x) => { LOOK = x; applyStyle(x.stile); }).catch(() => {}),
+  api("/api/aspetto").then((x) => applyLook(x)).catch(() => {}),
 ]).finally(() => { applyLang(); buildNav(); route(); });
 
 /* ------------------------------------------------------------------ "Modifica i testi" (2026-10-30)
    Clic on a text of the page, write the new one: it is saved in testi_cruscotto.json (data folder) and used at once.
    The original Italian text stays the key, so "Ripristina" always brings it back. */
 let textsFile = "", editing = false;
-const editBtn = document.getElementById("text-edit");
+const editBtn = document.getElementById("text-edit") || h("button");
 const editBar = h("div", {class: "tedit-bar", role: "status", hidden: true},
   h("span", null, "Modifica dei testi: clic su un testo per cambiarlo."), " ",
   h("button", {type: "button", class: "btn small", onclick: () => setEditing(false)}, "Fine"));
@@ -2833,7 +3765,7 @@ function textsBlock() {
   const rows = Object.entries(IT_OVR);
   return h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", null, "Testi del cruscotto"),
       h("button", {type: "button", class: "btn", onclick: () => setEditing(true)}, "Modifica i testi")),
-    h("p", {class: "muted"}, "Premi «Modifica i testi» (anche in fondo alla barra a sinistra), poi fai clic su qualsiasi testo della pagina e scrivi quello nuovo. Le modifiche valgono su ogni PC che usa questo disco dei dati."),
+    h("p", {class: "muted"}, "Premi «Modifica i testi» (anche in Impostazioni, l'ingranaggio in basso a sinistra), poi fai clic su qualsiasi testo della pagina e scrivi quello nuovo. Le modifiche valgono su ogni PC che usa questo disco dei dati."),
     rows.length ? h("div", {class: "table-wrap"}, h("table", null,
       h("thead", null, h("tr", null, h("th", {scope: "col"}, "Testo originale"), h("th", {scope: "col"}, "Testo nuovo"), h("th", {scope: "col"}, ""))),
       h("tbody", null, rows.map(([k, v]) => h("tr", null, h("td", {text: k}), h("td", {text: v}),
@@ -2847,19 +3779,163 @@ function textsBlock() {
 /* ------------------------------------------------------------------ look (2026-10-30): styles and blocks
    The style (colours, corners, headings) and, for each section, the order of the blocks, their width (whole or half)
    and the blocks taken away: in aspetto_cruscotto.json of the data folder, the same on every PC. */
-let LOOK = {stile: "classico", sezioni: {}};
+let LOOK = {stile: "classico", contrasto: "normale", personali: {}, sezioni: {}};
 const STYLE_NAMES = ["classico", "moderno", "industriale", "oceano", "terra"];
 const styleSel = document.getElementById("style-set");
+const styleEditBtn = document.getElementById("style-edit");
+/* 2026-11-03: custom styles are the same tokens as the built-in ones (STYLE_DATA, from tools/stili/genera_stili.py);
+   the module colour (ORPHEUS green, EURYDIKE red) is never part of a style. */
+const SD = typeof STYLE_DATA === "object" ? STYLE_DATA : {fonts: {}, patterns: {}, shadows: {}, spaces: {}, colours: [], vars: {}, styles: {}};
+function styleDecls(st, theme) {
+  const c = st[theme === "light" ? "chiaro" : "scuro"] || {};
+  const [pat, size] = SD.patterns[st.motivo] || ["none", "auto"];
+  const [gap, pad] = SD.spaces[st.spazio] || ["18px", "18px 20px"];
+  const sh = (SD.shadows[st.ombra] || ["none", "none"])[theme === "light" ? 0 : 1];
+  const out = SD.colours.filter((k) => c[k]).map((k) => `${SD.vars[k]}:${c[k]}`);
+  for (const [k, v] of [["good", "--good"], ["warn", "--warn"], ["crit", "--crit"]]) if (c[k]) out.push(`${v}:${c[k]}`);
+  out.push(`--sans:${SD.fonts[st.testo]}`, `--serif:${SD.fonts[st.titoli]}`, `--fs:${st.dimensione}px`, `--r-lg:${st.angoli}px`,
+    `--r-md:${Math.max(2, Math.round(st.angoli * 0.6))}px`, `--r-pill:${st.angoli >= 6 ? 999 : Math.max(2, st.angoli)}px`, `--sh-block:${sh}`,
+    `--gap:${gap}`, `--pad:${pad}`, `--pat:${pat}`, `--pat-size:${size}`, `--pat-a:${(st.intensita / 100 * (theme === "light" ? 1 : 0.8)).toFixed(3)}`);
+  if (theme === "dark") out.unshift("color-scheme:dark");
+  return out.join(";");
+}
+function styleCss(st) {
+  const sel = `:root[data-style="${st.id}"]`;
+  return `${sel}{${styleDecls(st, "light")}}\n@media (prefers-color-scheme:dark){${sel}:not([data-theme="light"]){${styleDecls(st, "dark")}}}\n${sel}[data-theme="dark"]{${styleDecls(st, "dark")}}`;
+}
+function injectCustomStyles(extra) {
+  const all = {...(LOOK.personali || {}), ...(extra ? {[extra.id]: extra} : {})};
+  const css = Object.values(all).map(styleCss).join("\n");
+  let el = document.getElementById("custom-styles");
+  if (!el) { el = document.createElement("style"); el.id = "custom-styles"; document.head.append(el); }
+  el.textContent = css;
+  if (!extra) { try { localStorage.setItem("orpheus-stili-css", css); } catch (e) { /* not available */ } }
+}
+function fillStyleSelect() {
+  const own = Object.values(LOOK.personali || {});
+  styleSel.replaceChildren(...STYLE_NAMES.map((n) => h("option", {value: n}, t(n[0].toUpperCase() + n.slice(1)))),
+    own.length ? h("optgroup", {label: t("I tuoi stili")}, own.map((x) => h("option", {value: x.id}, x.nome))) : null);
+}
 function applyStyle(st) {
-  if (!STYLE_NAMES.includes(st)) st = "classico";
+  if (!STYLE_NAMES.includes(st) && !(LOOK.personali || {})[st]) st = "classico";
   document.documentElement.setAttribute("data-style", st);
   styleSel.value = st;
+  if (styleEditBtn) styleEditBtn.hidden = !(LOOK.personali || {})[st];
   try { localStorage.setItem("orpheus-stile", st); } catch (e) { /* not available */ }
+}
+function applyContrast(v) {
+  v = v === "alto" ? "alto" : "normale";
+  if (v === "alto") document.documentElement.setAttribute("data-contrast", "alto"); else document.documentElement.removeAttribute("data-contrast");
+  for (const b of document.querySelectorAll("[data-contrast-set]")) b.setAttribute("aria-pressed", String(b.dataset.contrastSet === v));
+  try { localStorage.setItem("orpheus-contrasto", v === "alto" ? "alto" : ""); } catch (e) { /* not available */ }
+}
+function applyLook(x) {
+  LOOK = {stile: "classico", contrasto: "normale", personali: {}, sezioni: {}, ...x};
+  injectCustomStyles(); fillStyleSelect(); applyStyle(LOOK.stile); applyContrast(LOOK.contrasto);
 }
 styleSel.addEventListener("change", async () => {
   applyStyle(styleSel.value); LOOK.stile = styleSel.value;
   try { await postJson("/api/aspetto", {stile: styleSel.value}); } catch (e) { /* the style still applies here */ }
 });
+for (const b of document.querySelectorAll("[data-contrast-set]")) b.addEventListener("click", async () => {
+  applyContrast(b.dataset.contrastSet); LOOK.contrasto = b.dataset.contrastSet;
+  try { await postJson("/api/aspetto", {contrasto: b.dataset.contrastSet}); } catch (e) { /* applies here */ }
+});
+/* contrast ratio (WCAG) of two #rrggbb colours */
+function contrastRatio(a, b) {
+  const lum = (hex) => { const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
+const STYLE_COLOUR_LABELS = {bg: "Sfondo", bg2: "Sfumatura dello sfondo", panel: "Blocchi", sunk: "Campi e riquadri", ink: "Testo",
+  ink2: "Testo secondario", ink3: "Testo tenue", rule: "Linee", rule2: "Linee tenui", good: "Bene (verde)", warn: "Attenzione (giallo)", crit: "Problema (rosso)"};
+const STATUS_DEFAULT = {chiaro: {good: "#0ca30c", warn: "#fab219", crit: "#d03b3b"}, scuro: {good: "#0ca30c", warn: "#fab219", crit: "#d03b3b"}};
+function openStyleEditor(existing) {
+  const base = existing || {...structuredClone(SD.styles[STYLE_NAMES.includes(LOOK.stile) ? LOOK.stile : "classico"]), nome: ""};
+  const st = structuredClone(base);
+  st.id = existing ? existing.id : `p-${Date.now().toString(36)}`;
+  for (const th of ["chiaro", "scuro"]) st[th] = {...STATUS_DEFAULT[th], ...st[th]};
+  const before = document.documentElement.getAttribute("data-style");
+  const preview = () => { injectCustomStyles(st); document.documentElement.setAttribute("data-style", st.id); checks(); };
+  const msg = h("p", {class: "error", role: "alert", hidden: true});
+  const checkBox = h("div", {class: "st-check", "aria-live": "polite"});
+  const checks = () => {
+    const rows = [];
+    for (const [th, label] of [["chiaro", "Chiaro"], ["scuro", "Scuro"]]) {
+      const c = st[th];
+      for (const [k, need] of [["ink", 4.5], ["ink2", 4.5], ["ink3", 4.5]]) {
+        const r = contrastRatio(c[k], c.panel);
+        rows.push(tag(`${t(label)} · ${t(STYLE_COLOUR_LABELS[k])}: ${r.toFixed(1)}:1`, r >= need ? "good" : "crit"));
+      }
+    }
+    put(checkBox, h("span", {class: "muted"}, t("Contrasto sui blocchi (serve almeno 4,5:1):")), ...rows);
+  };
+  const sel = (key, opts) => h("select", {onchange: (e) => { st[key] = e.target.value; preview(); }},
+    opts.map(([v, l]) => h("option", {value: v, selected: st[key] === v ? true : null}, t(l))));
+  const range = (key, min, max, unit) => {
+    const out = h("output", null, `${st[key]}${unit}`);
+    return h("span", {class: "st-swatch"}, h("input", {type: "range", min: String(min), max: String(max), value: String(st[key]),
+      oninput: (e) => { st[key] = Number(e.target.value); out.textContent = `${st[key]}${unit}`; preview(); }}), out);
+  };
+  const colours = (th) => h("div", {class: "st-colors"}, Object.keys(STYLE_COLOUR_LABELS).map((k) => h("label", null, t(STYLE_COLOUR_LABELS[k]),
+    h("input", {type: "color", value: st[th][k], oninput: (e) => { st[th][k] = e.target.value; preview(); }}))));
+  const FONT_LABELS = {atkinson: "Atkinson Hyperlegible (leggibile)", serif: "Source Serif (graziato)", sistema: "Carattere di sistema",
+    georgia: "Georgia", verdana: "Verdana", trebuchet: "Trebuchet", mono: "Monospaziato"};
+  const fonts = Object.keys(SD.fonts).map((k) => [k, FONT_LABELS[k] || k]);
+  const name = h("input", {type: "text", value: base.nome || "", maxlength: "40", placeholder: t("Es. Il mio stile")});
+  const startFrom = h("select", {onchange: (e) => { const src = e.target.value.startsWith("p-") ? LOOK.personali[e.target.value] : SD.styles[e.target.value];
+    if (!src) return; const keep = {id: st.id}; Object.assign(st, structuredClone(src), keep);
+    for (const th of ["chiaro", "scuro"]) st[th] = {...STATUS_DEFAULT[th], ...st[th]}; openFor(); }},
+    h("option", {value: ""}, t("— scegli —")), STYLE_NAMES.map((n) => h("option", {value: n}, t(n[0].toUpperCase() + n.slice(1)))),
+    Object.values(LOOK.personali || {}).map((x) => h("option", {value: x.id}, x.nome)));
+  const restore = () => { injectCustomStyles(); document.documentElement.setAttribute("data-style", before || "classico"); applyStyle(LOOK.stile); };
+  const close = (keep) => { drawerOnClose = keep ? null : restore; closeDrawer(); };
+  const save = async () => {
+    st.nome = name.value.trim();
+    msg.hidden = true;
+    try {
+      const out = await postJson("/api/aspetto", {stile_personale: st, stile: st.id});
+      applyLook(out); close(true);
+    } catch (err) { msg.hidden = false; msg.textContent = err.message; }
+  };
+  const remove = async () => {
+    if (!confirm(t("Eliminare questo stile? Torna lo stile Classico."))) return;
+    try { const out = await postJson("/api/aspetto", {elimina_stile: st.id}); applyLook(out); close(true); }
+    catch (err) { msg.hidden = false; msg.textContent = err.message; }
+  };
+  const openFor = () => {
+    put(dbody, h("div", {class: "st-editor"},
+      h("h2", {id: "drawer-title"}, existing ? t("Modifica lo stile") : t("Crea uno stile")),
+      h("p", {class: "muted"}, t("Le modifiche si vedono subito sulla pagina. Il colore di ORPHEUS e di EURYDIKE non cambia; i testi non si cambiano da qui.")),
+      h("div", {class: "form-grid"}, field(t("Nome"), name), field(t("Parti da"), startFrom)),
+      h("fieldset", null, h("legend", null, t("Caratteri")),
+        h("div", {class: "form-grid"}, field(t("Testo"), sel("testo", fonts)), field(t("Titoli"), sel("titoli", fonts))),
+        field(t("Dimensione del testo"), range("dimensione", 13, 19, " px"))),
+      h("fieldset", null, h("legend", null, t("Colori — tema chiaro")), colours("chiaro")),
+      h("fieldset", null, h("legend", null, t("Colori — tema scuro")), colours("scuro")),
+      h("fieldset", null, h("legend", null, t("Forma e spazi")),
+        field(t("Angoli arrotondati"), range("angoli", 0, 24, " px")),
+        h("div", {class: "form-grid"}, field(t("Ombre dei blocchi"), sel("ombra", [["nessuna", "nessuna"], ["lieve", "lieve"], ["media", "media"], ["forte", "forte"]])),
+          field(t("Spazio tra i blocchi"), sel("spazio", [["compatta", "compatto"], ["normale", "normale"], ["ariosa", "arioso"]])))),
+      h("fieldset", null, h("legend", null, t("Sfondo disegnato")),
+        h("div", {class: "form-grid"}, field(t("Disegno"), sel("motivo", [["nessuno", "nessuno"], ["punti", "punti"], ["griglia", "griglia"], ["onde", "onde"],
+          ["curve", "curve di livello"], ["diagonali", "righe diagonali"], ["macchie", "macchie di colore"]])),
+          field(t("Intensità"), range("intensita", 0, 15, " %")))),
+      checkBox, msg,
+      h("div", {class: "action-row"}, h("button", {type: "button", class: "btn primary", onclick: save}, t("Salva lo stile")),
+        h("button", {type: "button", class: "btn", onclick: () => close(false)}, t("Annulla")),
+        existing ? h("button", {type: "button", class: "btn", onclick: remove}, t("Elimina")) : null)));
+    preview();
+  };
+  opener = document.activeElement;
+  drawerOnClose = restore;
+  drawer.hidden = false;                      // no dark veil: the page shows the style while it changes
+  openFor();
+  name.focus();
+}
+document.getElementById("style-new")?.addEventListener("click", () => openStyleEditor(null));
+styleEditBtn?.addEventListener("click", () => { const x = (LOOK.personali || {})[LOOK.stile]; if (x) openStyleEditor(structuredClone(x)); });
 const LAYOUT_SECTIONS = new Set(["panoramica", "articoli", "riviste", "manoscritti", "sottomissioni", "verifiche", "funzioni",
   "condivisione", "sistema"]);
 const BLOCK_SEL = ".block, .group, .stats, .kpis, details.block, section";
@@ -3023,4 +4099,19 @@ document.addEventListener("focusin", (e) => { const el = e.target.closest("[data
 document.addEventListener("focusout", jHide);
 window.addEventListener("scroll", jHide, true);
 window.addEventListener("hashchange", jHide);
+})();
+
+/* ------------------------------------------------------------------ Impostazioni (2026-11-03): the gear opens theme,
+   language, style, «Personalizza i blocchi» and, in the owner's version only, «Modifica i testi». */
+(() => {
+  const btn = document.getElementById("settings-btn"), panel = document.getElementById("settings-panel");
+  if (!btn || !panel) return;
+  const set = (open) => { panel.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
+  btn.addEventListener("click", () => set(panel.hidden));
+  for (const id of ["layout-edit", "text-edit"]) {
+    const b = document.getElementById(id);
+    if (b) b.addEventListener("click", () => set(false));
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) { set(false); btn.focus(); } });
+  document.addEventListener("click", (e) => { if (!panel.hidden && !e.target.closest("#settings-panel, #settings-btn")) set(false); });
 })();

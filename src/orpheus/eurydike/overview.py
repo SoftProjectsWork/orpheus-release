@@ -31,6 +31,17 @@ def _src(fonte: str, data) -> dict:
     return {"fonte": fonte, "data": data}
 
 
+def _progress(conn: sqlite3.Connection, review_id: str) -> dict:
+    from .workspace import progress
+    return progress(conn, review_id)
+
+
+def _dupes_to_decide(conn: sqlite3.Connection, review_id: str) -> int:
+    """Pairs proposed or possible that a person has not decided yet (EURYDIKE → Duplicati)."""
+    from .duplicates import counts, pairs
+    return counts(pairs(conn, review_id))["da_decidere_non_trovati"]
+
+
 def _max(*values):
     vs = [v for v in values if v]
     return max(vs) if vs else None
@@ -151,7 +162,7 @@ def _appraisals(conn: sqlite3.Connection, study_ids: list[str]) -> dict[str, dic
                 choice.update({"nome": choice["strumento"], "voci": None, "giudicate": 0})
                 continue
             label = who.get(key, (9, None))[1]
-            d = judged[key].get(label, {}) if label else {}
+            d = {k: v for k, v in (judged[key].get(label, {}) if label else {}).items() if k != "_overall"}
             choice.update({"nome": tool.name, "voci": len(tool.items), "giudicate": len(d), "giudice": label,
                            "stati": dict(states[key])})
             if kind == "rob":
@@ -172,7 +183,9 @@ def reviews(conn: sqlite3.Connection) -> dict:
         st = conn.execute("SELECT count(*), sum(ft_decision = 'include') FROM review_study WHERE review_id = ?",
                           (r["id"],)).fetchone()
         out.append({"id": r["id"], "titolo": r["title"], "tipo": KIND_LABELS.get(r["kind"], r["kind"]),
-                    "stato": STATUS_LABELS.get(r["status"], r["status"]), "creata": r["created_at"],
+                    "stato": STATUS_LABELS.get(r["status"], r["status"]), "fase": r["status"],
+                    "attiva": r["status"] != "closed", "creata": r["created_at"], "domanda": r["question"],
+                    "ultima_attivita": _max(r["created_at"], n[2]),
                     "record": (n[0] or 0) - (n[1] or 0), "doppioni": n[1] or 0, "studi": st[0] or 0,
                     "inclusi": st[1] or 0})
     data = _max(*(x["creata"] for x in out))
@@ -207,7 +220,10 @@ def review_overview(conn: sqlite3.Connection, review_id: str) -> dict | None:
     studies = _studies(conn, review_id)
     included = [s for s in studies if s["ft_decision"] == "include"]
     apprs = _appraisals(conn, [s["id"] for s in included])
-    prisma = prisma_counts([{"raw": i["raw_count"], "dupes": i["dupes_count"]} for i in imports],
+    # duplicates as they are now (the hand decisions of EURYDIKE → Doppioni change them after the import)
+    now_dupes = dict(conn.execute("SELECT import_id, count(*) FROM review_record WHERE review_id = ? "
+                                  "AND duplicate_of IS NOT NULL GROUP BY import_id", (review_id,)).fetchall())
+    prisma = prisma_counts([{"raw": i["raw_count"], "dupes": now_dupes.get(i["id"], 0)} for i in imports],
                            len(finals), finals,
                            [{"ft": {"not_retrieved": "na"}.get(s["ft_decision"], s["ft_decision"]),
                              "pages": s["pagine"] or 0} for s in studies])
@@ -261,6 +277,7 @@ def review_overview(conn: sqlite3.Connection, review_id: str) -> dict | None:
     to_do = {
         "protocollo": 0 if any(c["kind"] == "inclusion" for c in cur_criteria)
         and any(c["kind"] == "exclusion" for c in cur_criteria) else 1,
+        "doppioni": _dupes_to_decide(conn, review_id),
         "screening": buckets["da_decidere"] + buckets["parziali"],
         "fulltext": sum(1 for s in studies if s["ft_decision"] == "pending"),
         "estrazione": sum((x["scheda"] or {}).get("da_controllare", 0) for x in extraction)
@@ -280,15 +297,18 @@ def review_overview(conn: sqlite3.Connection, review_id: str) -> dict | None:
     return {
         "revisione": {"id": rv["id"], "titolo": rv["title"], "domanda": rv["question"],
                       "tipo": KIND_LABELS.get(rv["kind"], rv["kind"]), "stato": STATUS_LABELS.get(rv["status"], rv["status"]),
+                      "tipo_codice": rv["kind"], "fase": rv["status"],
                       "registrazione": rv["registration"], "strategia": rv["search_strategy"], "pico": pico,
                       "revisori_screening": need, "cieco": bool(rv["blind_reviewers"]), "cieco_ai": bool(rv["blind_ai"]),
                       "rob_predefinito": rv["rob_tool_default"], "qualita_predefinita": rv["qual_tool_default"],
                       "creata": rv["created_at"], "cartella": rv["data_dir"]},
         "da_fare": to_do,
+        "avanzamento": _progress(conn, review_id),
         "protocollo": {
             "criteri": [{"id": c["id"], "tipo": c["kind"], "ord": c["ord"], "testo": c["text"],
                          "regola": json.loads(c["rule_json"]) if c["rule_json"] else None, "creato": c["created_at"],
-                         "sostituito_da": c["superseded_by"]} for c in criteria],
+                         "sostituito_da": c["superseded_by"],
+                         "ritirato": c["superseded_by"] == c["id"]} for c in criteria],
             "revisori": [{"id": r["id"], "tipo": REVIEWER_LABELS.get(r["kind"], r["kind"]), "nome": r["label"],
                           "modello": r["model_ref"]} for r in reviewers],
             "importazioni": [{"fonte_file": i["source_name"], "banca_dati": i["database_name"], "formato": i["format"],

@@ -97,6 +97,48 @@ def new_review(conn: sqlite3.Connection, home: Path, form: dict, *, actor: str =
     return {"id": rid, "cartella": str(folder), "criteri": {"inclusione": len(inc), "esclusione": len(exc)}}
 
 
+FORM_FIELDS = {"titolo": "title", "domanda": "question", "tipo": "kind", "registrazione": "registration",
+               "strategia": "search_strategy", "revisori_screening": "screen_reviewers", "cieco": "blind_reviewers",
+               "cieco_ai": "blind_ai", "rob": "rob_tool_default", "qualita": "qual_tool_default", "fase": "status"}
+
+
+def edit_review(conn: sqlite3.Connection, home: Path, review_id: str, form: dict, *, actor: str = "user") -> dict:
+    """The pencil of the dashboard (2026-11-03): change the parameters given in `form` (names of the creation form,
+    PICOS as P, I, C, O, S), then rewrite `protocollo.yaml`. The folder of the review keeps its name."""
+    changes = {FORM_FIELDS[k]: v for k, v in form.items() if k in FORM_FIELDS}
+    if any(k in form for k in PICO_KEYS):
+        changes["pico"] = {k: form.get(k) or "" for k in PICO_KEYS}
+    out = rv.update_review(conn, review_id, changes, actor=actor)
+    write_protocol(conn, home, review_id)
+    return out
+
+
+def edit_criterion(conn: sqlite3.Connection, home: Path, review_id: str, form: dict, *, actor: str = "user") -> dict:
+    """Criteria from the dashboard: azione "aggiungi" (tipo, testo), "modifica" (id, testo: a new criterion replaces
+    the old one, same number) or "ritira" (id). The old one stays in the history."""
+    action = form.get("azione")
+    kinds = {"inclusione": "inclusion", "esclusione": "exclusion", "inclusion": "inclusion", "exclusion": "exclusion"}
+    if action == "aggiungi":
+        kind = kinds.get(str(form.get("tipo") or ""))
+        if not kind:
+            raise rv.ReviewError("tipo di criterio: inclusione o esclusione")
+        cid = rv.add_criterion(conn, review_id, kind=kind, text=str(form.get("testo") or ""), actor=actor)
+    elif action == "modifica":
+        old = conn.execute("SELECT kind FROM review_criterion WHERE id = ? AND review_id = ?",
+                           (str(form.get("id") or ""), review_id)).fetchone()
+        if old is None:
+            raise rv.ReviewError("criterio non trovato")
+        cid = rv.add_criterion(conn, review_id, kind=old[0], text=str(form.get("testo") or ""),
+                               replaces=str(form["id"]), actor=actor)
+    elif action == "ritira":
+        rv.withdraw_criterion(conn, review_id, str(form.get("id") or ""), actor=actor)
+        cid = None
+    else:
+        raise rv.ReviewError("azione non ammessa: aggiungi, modifica o ritira")
+    write_protocol(conn, home, review_id)
+    return {"id": cid}
+
+
 def write_protocol(conn: sqlite3.Connection, home: Path, review_id: str) -> Path:
     """`protocollo.yaml` in the folder of the review: what the database holds now (current criteria)."""
     r = conn.execute("SELECT * FROM review WHERE id = ?", (review_id,)).fetchone()
@@ -141,12 +183,18 @@ def database_name(filename: str, fmt: str) -> str:
     return FORMAT_DATABASE.get(fmt, fmt.upper())
 
 
-def search_files(conn: sqlite3.Connection, home: Path, review_id: str) -> dict:
-    """The files of `ricerca\\` with what the import would do: format, records, database, already imported or not."""
+def default_search_dir(conn: sqlite3.Connection, home: Path, review_id: str) -> Path:
     r = conn.execute("SELECT data_dir FROM review WHERE id = ?", (review_id,)).fetchone()
     if r is None:
         raise rv.ReviewError("revisione non trovata")
-    folder = review_dir(home, r["data_dir"]) / SEARCH
+    return review_dir(home, r["data_dir"]) / SEARCH
+
+
+def search_files(conn: sqlite3.Connection, home: Path, review_id: str, folder: Path | None = None) -> dict:
+    """The files of the search folder with what the import would do: format, records, database, already imported or
+    not. `folder`: the folder chosen by the user for this review on this PC (2026-11-03), else `ricerca\\`."""
+    default = default_search_dir(conn, home, review_id)
+    folder = Path(folder) if folder else default
     done = {x["file_sha256"]: dict(x) for x in conn.execute(
         "SELECT file_sha256, source_name, database_name, format, imported_at, raw_count, dupes_count FROM search_import "
         "WHERE review_id = ?",
@@ -175,12 +223,13 @@ def search_files(conn: sqlite3.Connection, home: Path, review_id: str) -> dict:
                 except ValueError as exc:
                     item.update(stato="non leggibile", errore=str(exc))
             out.append(item)
-    return {"cartella": str(folder), "file": out}
+    return {"cartella": str(folder), "predefinita": str(default), "scelta": folder != default, "file": out}
 
 
-def import_new(conn: sqlite3.Connection, home: Path, review_id: str, *, actor: str = "user") -> dict:
-    """Import every new readable file of `ricerca\\`; one transaction per file. Returns the report of every file."""
-    listing = search_files(conn, home, review_id)
+def import_new(conn: sqlite3.Connection, home: Path, review_id: str, *, folder: Path | None = None,
+               actor: str = "user") -> dict:
+    """Import every new readable file of the search folder; one transaction per file. Returns the report of every file."""
+    listing = search_files(conn, home, review_id, folder)
     folder = Path(listing["cartella"])
     done = []
     for item in listing["file"]:

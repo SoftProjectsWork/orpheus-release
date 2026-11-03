@@ -103,7 +103,7 @@ REVIEW_FIELDS = [
     ("sintesi", False, "Metodo di sintesi (es. meta-analisi a effetti casuali, SMD, eterogeneità I2) o sintesi narrativa"),
     ("certezza_prove", False, "Certezza delle prove (es. GRADE), se valutata"),
     ("prisma_identificati", False, "Diagramma PRISMA: record identificati"),
-    ("prisma_doppioni", False, "Diagramma PRISMA: doppioni rimossi"),
+    ("prisma_doppioni", False, "Diagramma PRISMA: duplicati rimossi"),
     ("prisma_esaminati", False, "Diagramma PRISMA: record esaminati (titolo e abstract)"),
     ("prisma_esclusi_esame", False, "Diagramma PRISMA: record esclusi a titolo e abstract"),
     ("prisma_testo_completo", False, "Diagramma PRISMA: articoli letti per intero"),
@@ -284,7 +284,7 @@ def prisma_problems(study: dict) -> list[str]:
                                                           "testo_completo", "esclusi_testo", "inclusi", "meta_analisi")}
     out = []
     if None not in (n["identificati"], n["doppioni"], n["esaminati"]) and n["identificati"] - n["doppioni"] != n["esaminati"]:
-        out.append("studio.csv: PRISMA, identificati meno doppioni non dà gli esaminati")
+        out.append("studio.csv: PRISMA, identificati meno duplicati non dà gli esaminati")
     if None not in (n["esaminati"], n["esclusi_esame"], n["testo_completo"]) and \
             n["esaminati"] - n["esclusi_esame"] != n["testo_completo"]:
         out.append("studio.csv: PRISMA, esaminati meno esclusi non dà gli articoli letti per intero")

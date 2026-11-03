@@ -5,11 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cruscotto ORPHEUS</title>
 <link rel="stylesheet" href="/static/app.css">
-<script>try{var st=localStorage.getItem("orpheus-stile");if(st)document.documentElement.setAttribute("data-style",st)}catch(e){}</script>
+<script>try{var d=document.documentElement,st=localStorage.getItem("orpheus-stile"),c=localStorage.getItem("orpheus-contrasto"),css=localStorage.getItem("orpheus-stili-css");if(st)d.setAttribute("data-style",st);if(c)d.setAttribute("data-contrast",c);if(css){var e=document.createElement("style");e.id="custom-styles";e.textContent=css;document.head.appendChild(e)}}catch(e){}</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d6b58'/%3E%3Cpath d='M8%206.5C11.9%206.5%2013.5%2010.1%2013.1%2013.6C12.8%2016.4%2011%2018.9%207.5%2020M24%206.5C20.1%206.5%2018.5%2010.1%2018.9%2013.6C19.2%2016.4%2021%2018.9%2024.5%2020M7.5%2020H24.5M16%2020V26.5' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
-<body data-token="__ORPHEUS_TOKEN__" data-version="__ORPHEUS_VERSION__">
+<body data-token="__ORPHEUS_TOKEN__" data-version="__ORPHEUS_VERSION__" data-dev="__ORPHEUS_DEV__">
 <a class="skip" href="#main" data-i18n="Vai al contenuto">Vai al contenuto</a>
+<div class="bg-art" aria-hidden="true"></div>
 <div class="shell">
   <nav class="side" aria-label="Sezioni del cruscotto" data-i18n-aria="Sezioni del cruscotto">
     <div class="brand">
@@ -23,25 +24,42 @@
     <ul class="nav" id="nav"></ul>
     <div class="side-foot">
       <div id="lavora-badge" class="lavora-badge" hidden></div>
-      <div class="theme" role="group" aria-label="Tema" data-i18n-aria="Tema">
-        <button type="button" data-theme-set="light" aria-pressed="false" data-i18n="Chiaro">Chiaro</button>
-        <button type="button" data-theme-set="dark" aria-pressed="false" data-i18n="Scuro">Scuro</button>
+      <button type="button" class="btn small settings-btn" id="settings-btn" aria-expanded="false" aria-controls="settings-panel">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        <span data-i18n="Impostazioni">Impostazioni</span>
+      </button>
+      <div class="settings-panel" id="settings-panel" role="region" aria-label="Impostazioni" data-i18n-aria="Impostazioni" hidden>
+        <p class="set-label" data-i18n="Tema">Tema</p>
+        <div class="theme" role="group" aria-label="Tema" data-i18n-aria="Tema">
+          <button type="button" data-theme-set="light" aria-pressed="false" data-i18n="Chiaro">Chiaro</button>
+          <button type="button" data-theme-set="dark" aria-pressed="false" data-i18n="Scuro">Scuro</button>
+        </div>
+        <p class="set-label" data-i18n="Lingua">Lingua</p>
+        <div class="theme lang" role="group" aria-label="Lingua" data-i18n-aria="Lingua">
+          <button type="button" data-lang-set="it" aria-pressed="true" lang="it">IT</button>
+          <button type="button" data-lang-set="en" aria-pressed="false" lang="en">EN</button>
+        </div>
+        <label class="stylesel"><span data-i18n="Stile">Stile</span>
+          <select id="style-set">
+            <option value="classico" data-i18n="Classico">Classico</option>
+            <option value="moderno" data-i18n="Moderno">Moderno</option>
+            <option value="industriale" data-i18n="Industriale">Industriale</option>
+            <option value="oceano" data-i18n="Oceano">Oceano</option>
+            <option value="terra" data-i18n="Terra">Terra</option>
+          </select>
+        </label>
+        <p class="set-label" data-i18n="Contrasto">Contrasto</p>
+        <div class="theme" role="group" aria-label="Contrasto" data-i18n-aria="Contrasto">
+          <button type="button" data-contrast-set="normale" aria-pressed="true" data-i18n="Normale">Normale</button>
+          <button type="button" data-contrast-set="alto" aria-pressed="false" data-i18n="Alto">Alto</button>
+        </div>
+        <div class="row">
+          <button type="button" class="btn small" id="style-new" data-i18n="Crea uno stile">Crea uno stile</button>
+          <button type="button" class="btn small" id="style-edit" hidden data-i18n="Modifica questo stile">Modifica questo stile</button>
+        </div>
+        <button type="button" class="btn small text-edit-btn" id="layout-edit" aria-pressed="false" data-i18n="Personalizza i blocchi">Personalizza i blocchi</button>
+        <button type="button" class="btn small text-edit-btn dev-only" id="text-edit" aria-pressed="false" data-i18n="Modifica i testi">Modifica i testi</button>
       </div>
-      <div class="theme lang" role="group" aria-label="Lingua" data-i18n-aria="Lingua">
-        <button type="button" data-lang-set="it" aria-pressed="true" lang="it">IT</button>
-        <button type="button" data-lang-set="en" aria-pressed="false" lang="en">EN</button>
-      </div>
-      <label class="stylesel"><span data-i18n="Stile">Stile</span>
-        <select id="style-set">
-          <option value="classico" data-i18n="Classico">Classico</option>
-          <option value="moderno" data-i18n="Moderno">Moderno</option>
-          <option value="industriale" data-i18n="Industriale">Industriale</option>
-          <option value="oceano" data-i18n="Oceano">Oceano</option>
-          <option value="terra" data-i18n="Terra">Terra</option>
-        </select>
-      </label>
-      <button type="button" class="btn small text-edit-btn" id="layout-edit" aria-pressed="false" data-i18n="Personalizza i blocchi">Personalizza i blocchi</button>
-      <button type="button" class="btn small text-edit-btn" id="text-edit" aria-pressed="false" data-i18n="Modifica i testi">Modifica i testi</button>
       <p class="version"><span data-i18n="Versione">Versione</span> __ORPHEUS_VERSION__</p>
     </div>
   </nav>
@@ -59,6 +77,7 @@
   <div class="drawer-body" id="drawer-body"></div>
 </aside>
 <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+<script src="/static/stili.js"></script>
 <script src="/static/en.js"></script>
 <script src="/static/app.js"></script>
 </body>
