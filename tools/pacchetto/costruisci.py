@@ -29,7 +29,10 @@ REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 PY_TAG = "312"                                  # Python 3.12 (python312._pth); same minor as the embeddable zip
 EXTRAS = ("semantica", "cruscotto")             # local search by meaning, dashboard in the browser
-ALSO = ("tzdata",)                              # time zones for zoneinfo on Windows
+ALSO = ("tzdata",)
+# Longest path inside the zip: Windows stops at 260 characters, and the zip is extracted under
+# C:\Users\<name>\AppData\Local\Temp\<folder>\ (about 90 characters with a long user name).
+MAX_ENTRY = 160                              # time zones for zoneinfo on Windows
 
 # What goes into the public code (also used by pubblica.py). Patterns relative to the repository root.
 PUBLIC_FILES = [
@@ -148,10 +151,16 @@ def build(python_zip: Path, out: Path, *, repo: Path = REPO, pip_extra: list[str
     for f in ("installa.cmd", "installa.ps1", "LEGGIMI.txt", "GUIDA_ORPHEUS.html"):
         shutil.copy2(HERE / f, stage / f)
     zpath = out / f"{name}.zip"
+    # No __pycache__ / .pyc (Python writes them again on the PC): they are the longest paths in the libraries and,
+    # extracted in the temporary folder of a user with a long name, went past the 260 characters of Windows
+    # (2026-11-04, aggiorna.cmd on "C:\Users\MSI Prestige 14 Evo\..."). Every path stays under MAX_ENTRY.
+    files = [p for p in sorted(stage.rglob("*")) if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"]
+    too_long = [str(Path(name) / p.relative_to(stage)) for p in files if len(str(Path(name) / p.relative_to(stage))) > MAX_ENTRY]
+    if too_long:
+        raise SystemExit(f"percorsi troppo lunghi per Windows nel pacchetto (> {MAX_ENTRY}): {too_long[:5]}")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-        for p in sorted(stage.rglob("*")):
-            if p.is_file():
-                z.write(p, Path(name) / p.relative_to(stage))
+        for p in files:
+            z.write(p, Path(name) / p.relative_to(stage))
     return zpath
 
 

@@ -25,7 +25,8 @@ function Version-Of([string]$v) {
     try { return [version]$v } catch { return [version]'0.0' }
 }
 
-$work = Join-Path ([System.IO.Path]::GetTempPath()) ('orpheus_aggiornamento_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+# Nome corto: dentro lo zip ci sono percorsi lunghi e Windows si ferma a 260 caratteri (utenti con nomi lunghi).
+$work = Join-Path ([System.IO.Path]::GetTempPath()) ('oa' + (Get-Date -Format 'HHmmss'))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 try {
     if (-not $Pacchetto) {
