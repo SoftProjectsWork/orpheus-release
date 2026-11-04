@@ -1,5 +1,5 @@
 # aggiorna.ps1 - scarica e installa l'ultima versione di ORPHEUS dal repository pubblico (T-053).
-# Doppio clic su C:\ORPHEUS\aggiorna.cmd. Serve internet; niente git, niente account.
+# Doppio clic su aggiorna.cmd (menu Start > ORPHEUS > Aggiorna ORPHEUS). Serve internet; niente git, niente account.
 #   1. chiede a GitHub l'ultima versione pubblicata (SoftProjectsWork/orpheus-release, pagina Releases)
 #   2. se e' piu' nuova di quella installata scarica lo zip ORPHEUS_<versione>_windows.zip
 #   3. lo estrae in una cartella temporanea e lancia il suo installa.ps1 -Aggiornamento
@@ -11,7 +11,11 @@ param([string]$Pacchetto = '')
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Repo = 'SoftProjectsWork/orpheus-release'
-$Root = if ($env:ORPHEUS_INSTALL_ROOT) { $env:ORPHEUS_INSTALL_ROOT } else { $PSScriptRoot }
+# Dalla 0.76.0 il programma sta in %LOCALAPPDATA%\Programs\ORPHEUS; un aggiorna.cmd rimasto nella vecchia C:\ORPHEUS
+# guarda la versione installata nella cartella nuova.
+$Root = if ($env:ORPHEUS_INSTALL_ROOT) { $env:ORPHEUS_INSTALL_ROOT }
+        elseif ((Test-Path (Join-Path $PSScriptRoot 'VERSIONE.txt')) -or -not $env:LOCALAPPDATA) { $PSScriptRoot }
+        else { Join-Path $env:LOCALAPPDATA 'Programs\ORPHEUS' }
 $current = (Get-Content (Join-Path $Root 'VERSIONE.txt') -ErrorAction SilentlyContinue | Select-Object -First 1)
 if (-not $current) { $current = '0' }
 Write-Host "ORPHEUS installato: versione $current"
@@ -48,7 +52,7 @@ try {
     $inst = Get-ChildItem -Path $work -Recurse -Filter 'installa.ps1' | Select-Object -First 1
     if (-not $inst) { Write-Host "Il pacchetto non contiene installa.ps1: non e' un pacchetto di ORPHEUS."; exit 2 }
     Write-Host 'Chiudi le finestre di ORPHEUS (cruscotto compreso) se sono aperte.'
-    & $inst.FullName -Aggiornamento
+    & $inst.FullName -Aggiornamento -Da $PSScriptRoot
     exit $LASTEXITCODE
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue

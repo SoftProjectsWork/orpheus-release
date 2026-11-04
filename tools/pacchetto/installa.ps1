@@ -3,27 +3,33 @@
 # aggiorna.cmd lo lancia da solo con -Aggiornamento (nessuna domanda se il PC e' gia' configurato).
 #
 # Cosa fa, in ordine:
-#   1. copia Python e il codice in C:\ORPHEUS (python\ e orpheus\); il file .env del PC resta com'e'
+#   0. (una volta) porta le impostazioni, i registri e le copie di sicurezza di una vecchia installazione in C:\ORPHEUS
+#   1. copia Python e il codice in %LOCALAPPDATA%\Programs\ORPHEUS (python\ e orpheus\); il file .env del PC resta com'e'
 #   2. la prima volta chiede la cartella dei dati (predefinita C:\ORPHEUS_DATI) e l'e-mail per Crossref/OpenAlex
 #   3. se non c'e' un database lo crea (orpheus init); se c'e' lo aggiorna (orpheus migrate, copia di sicurezza prima)
-#   4. copia i comandi a doppio clic in C:\ORPHEUS e crea il collegamento "ORPHEUS" sul desktop (cruscotto)
+#   4. copia i comandi a doppio clic nella cartella del programma; collegamenti nel menu Start e sul desktop
 #   5. controllo generale (orpheus doctor)
 # I dati (database, PDF, schede) non vengono mai toccati dall'aggiornamento.
-# Tutto quello che compare a schermo viene scritto anche in C:\ORPHEUS\installazione_log.txt.
+# Tutto quello che compare a schermo viene scritto anche in %LOCALAPPDATA%\ORPHEUS\installazione_log.txt.
+# Cartelle dal 2026-11-04 (0.76.0): programma in %LOCALAPPDATA%\Programs\ORPHEUS, registri e copie di sicurezza in
+# %LOCALAPPDATA%\ORPHEUS (niente amministratore); prima tutto in C:\ORPHEUS, che si toglie alla fine.
+# -Da: cartella da cui e' partito aggiorna.cmd (se e' la vecchia C:\ORPHEUS, aggiorna.cmd resta fino alla prossima volta).
 
-param([switch]$Aggiornamento)
+param([switch]$Aggiornamento, [string]$Da = '')
 
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $env:PYTHONUTF8 = '1'
 # Variabili solo per i test e per la prova automatica del pacchetto (GitHub Actions).
-$Root    = if ($env:ORPHEUS_INSTALL_ROOT) { $env:ORPHEUS_INSTALL_ROOT } else { 'C:\ORPHEUS' }
+$Root    = if ($env:ORPHEUS_INSTALL_ROOT) { $env:ORPHEUS_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA 'Programs\ORPHEUS' }
+$State   = if ($env:ORPHEUS_STATE_DIR) { $env:ORPHEUS_STATE_DIR } elseif ($env:ORPHEUS_INSTALL_ROOT) { $Root } else { Join-Path $env:LOCALAPPDATA 'ORPHEUS' }
+$Legacy  = if ($env:ORPHEUS_LEGACY_ROOT) { $env:ORPHEUS_LEGACY_ROOT } elseif ($env:ORPHEUS_INSTALL_ROOT) { '' } else { 'C:\ORPHEUS' }
 $Here    = $PSScriptRoot
 $App     = Join-Path $Here 'app'
 $CodeDir = Join-Path $Root 'orpheus'
 $PyDir   = Join-Path $Root 'python'
-New-Item -ItemType Directory -Force -Path $Root | Out-Null
-$LogFile = Join-Path $Root 'installazione_log.txt'
+foreach ($d in @($Root, $State)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+$LogFile = Join-Path $State 'installazione_log.txt'
 Set-Content -Path $LogFile -Value "ORPHEUS - installazione dal pacchetto - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Encoding UTF8
 
 function Write-Log([string]$Text) { Write-Host $Text; Add-Content -Path $LogFile -Value $Text -Encoding UTF8 }
@@ -43,7 +49,7 @@ $Version = (Get-Content (Join-Path $App 'orpheus\VERSIONE.txt') -ErrorAction Sil
 if (-not $Version) { Stop-Install "manca la cartella app accanto a installa.cmd: estrai TUTTO lo zip e rilancia installa.cmd da li'." }
 Write-Log "ORPHEUS $Version - installazione in $Root"
 
-if (Test-Path (Join-Path $CodeDir '.git')) {
+if ((Test-Path (Join-Path $CodeDir '.git')) -or ($Legacy -and (Test-Path (Join-Path $Legacy 'orpheus\.git')))) {
     Stop-Install "su questo PC ORPHEUS e' installato con git (PC del responsabile): usa installa_orpheus.cmd, non questo pacchetto."
 }
 
@@ -51,6 +57,24 @@ if (Test-Path (Join-Path $CodeDir '.git')) {
 Write-Log ''; Write-Log '=== 1. Copia di Python e del codice ==='
 $envFile = Join-Path $CodeDir '.env'
 $savedEnv = if (Test-Path $envFile) { Get-Content $envFile -Raw } else { $null }
+$LocalDir = Join-Path $State 'locale'
+$Migrated = $false
+$legacyEnv = if ($Legacy) { Join-Path $Legacy 'orpheus\.env' } else { '' }
+if (-not $savedEnv -and $legacyEnv -and (Test-Path $legacyEnv)) {
+    # Vecchia installazione in C:\ORPHEUS: stesse impostazioni (cartella dei dati, e-mail), cartella locale nuova.
+    Write-Log "  Porto impostazioni, registri e copie di sicurezza da $Legacy"
+    $savedEnv = [regex]::Replace((Get-Content $legacyEnv -Raw), '(?m)^ORPHEUS_LOCAL_DIR=.*$', "ORPHEUS_LOCAL_DIR=$LocalDir")
+    foreach ($sub in @('locale', 'registri')) {
+        $from = Join-Path $Legacy $sub
+        if (Test-Path $from) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $State $sub) | Out-Null
+            foreach ($item in @(Get-ChildItem -LiteralPath $from -Force)) {
+                Copy-Item -LiteralPath $item.FullName -Destination (Join-Path (Join-Path $State $sub) $item.Name) -Recurse -Force
+            }
+        }
+    }
+    $Migrated = $true
+}
 foreach ($d in @($PyDir, $CodeDir)) {
     if (Test-Path $d) {
         Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
@@ -80,8 +104,7 @@ if (-not $savedEnv) {
         $email = Read-Host "  La tua e-mail (la chiedono Crossref e OpenAlex per le verifiche; resta su questo PC)"
     }
     $email = "$email".Trim()
-    $local = Join-Path $Root 'locale'
-    $lines = @("ORPHEUS_HOME=$($dati.Trim())", "ORPHEUS_LOCAL_DIR=$local")
+    $lines = @("ORPHEUS_HOME=$($dati.Trim())", "ORPHEUS_LOCAL_DIR=$LocalDir")
     if ($email -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { $lines += "ORPHEUS_CONTACT_EMAIL=$email" }
     else { Write-Log "  E-mail non indicata o non valida: le verifiche con Crossref e OpenAlex non partiranno finche' non la aggiungi in $envFile (riga ORPHEUS_CONTACT_EMAIL=...)." }
     Set-Content -Path $envFile -Value ($lines -join "`r`n") -Encoding UTF8
@@ -119,27 +142,28 @@ foreach ($f in @('aggiorna.cmd', 'aggiorna.ps1', 'LEGGIMI.txt', 'GUIDA_ORPHEUS.h
 }
 Set-Content -Path (Join-Path $Root 'VERSIONE.txt') -Value $Version -Encoding UTF8
 Write-Log "  $copied file copiati in $Root"
-try {
-    $desk = [Environment]::GetFolderPath('Desktop')
-    if ($desk -and $env:OS -eq 'Windows_NT' -and -not $env:ORPHEUS_INSTALL_ROOT) {
-        $sh = New-Object -ComObject WScript.Shell
-        $lnk = $sh.CreateShortcut((Join-Path $desk 'ORPHEUS.lnk'))
-        $lnk.TargetPath = Join-Path $Root 'cruscotto.cmd'
-        $lnk.WorkingDirectory = $Root
-        $lnk.IconLocation = (Join-Path $Root 'ORPHEUS.ico')
-        $lnk.Save()
-        Write-Log '  Collegamento "ORPHEUS" (cruscotto) sul desktop'
-    }
-} catch { Write-Log '  (collegamento sul desktop non creato)' }
+$links = Join-Path $Root 'collegamenti_orpheus.ps1'
+if (Test-Path $links) { & $links -Root $Root; Write-Log '  Collegamenti: menu Start > ORPHEUS e desktop (ORPHEUS, Comandi di ORPHEUS)' }
 
 # ---------------------------------------------------------------- 5. controllo
 Write-Log ''; Write-Log '=== 5. Controllo generale ==='
 $r = Invoke-Py @('doctor')
 Write-Log ("  orpheus doctor: {0}" -f $(if ($r.Code -eq 0) { 'tutto a posto' } else { "da guardare (codice $($r.Code), dettagli nel registro)" }))
 
+$old = Join-Path $Root 'vecchia_installazione.ps1'
+if ($Legacy -and (Test-Path $Legacy) -and (Test-Path $old)) {
+    # aggiorna.cmd partito dalla vecchia cartella (le versioni vecchie non dicono da dove: -Da vuoto) resta per ora.
+    $fromLegacy = $Aggiornamento -and (-not $Da -or $Da.TrimEnd('\').Equals($Legacy.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase))
+    $tieni = if ($fromLegacy) { @('aggiorna.cmd', 'aggiorna.ps1') } else { @() }
+    # aggiorna.ps1 nuovo al posto del vecchio (sa trovare la cartella nuova); aggiorna.cmd e' in uso: non si tocca.
+    if ($fromLegacy) { Copy-Item -Force (Join-Path $Root 'aggiorna.ps1') (Join-Path $Legacy 'aggiorna.ps1') -ErrorAction SilentlyContinue }
+    & $old -Legacy $Legacy -Root $Root -State $State -Tieni $tieni | ForEach-Object { Write-Log "$_" }
+}
+
 Write-Log ''
 Write-Log "FATTO: ORPHEUS $Version installato in $Root."
-Write-Log "  Cruscotto: doppio clic su ORPHEUS sul desktop (o $Root\cruscotto.cmd)."
+if ($Migrated) { Write-Log "  ORPHEUS non sta piu' in ${Legacy}: usa il menu Start > ORPHEUS o 'Comandi di ORPHEUS' sul desktop." }
+Write-Log "  Cruscotto: doppio clic su ORPHEUS sul desktop o nel menu Start (o $Root\cruscotto.cmd)."
 Write-Log "  Schede di un collega: metti il file .zip in $home_\inbox\condivisione e doppio clic su $Root\importa_schede.cmd."
 Write-Log "  Aggiornamenti: doppio clic su $Root\aggiorna.cmd."
 Write-Log "  Guida illustrata: $Root\GUIDA_ORPHEUS.html (si apre con il browser)."

@@ -76,9 +76,11 @@ class Settings:
         project = config.load_project()
         home = config.home()
         if commands_script is None:
-            root = Path(os.environ.get("ORPHEUS_TOOLS_ROOT") or r"C:\ORPHEUS")
-            candidate = root / "orpheus_comandi.ps1"
-            commands_script = candidate if candidate.exists() else None
+            # cruscotto.cmd passes --comandi; without it: the program folder (since 0.76.0), then the old C:\ORPHEUS
+            roots = [os.environ.get("ORPHEUS_TOOLS_ROOT")] if os.environ.get("ORPHEUS_TOOLS_ROOT") else [
+                str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "ORPHEUS"), r"C:\ORPHEUS"]
+            found = [Path(r) / "orpheus_comandi.ps1" for r in roots if (Path(r) / "orpheus_comandi.ps1").exists()]
+            commands_script = found[0] if found else None
         return cls(home, project, config.local_dir(), home / project.storage.db_path, commands_script,
                    powershell or os.environ.get("ORPHEUS_PWSH") or "powershell")
 

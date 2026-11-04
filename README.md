@@ -9,9 +9,9 @@ Questo repository contiene **solo il codice** distribuito ai colleghi: nessun da
 
 1. Apri **[Releases](../../releases/latest)** e scarica `ORPHEUS_<versione>_windows.zip` (Python incluso).
 2. Estrai tutto, poi doppio clic su `installa.cmd` e segui le domande.
-3. Per gli aggiornamenti: doppio clic su `C:\ORPHEUS\aggiorna.cmd`.
+3. Per gli aggiornamenti: menu Start > ORPHEUS > Aggiorna ORPHEUS (`aggiorna.cmd`).
 
 Guida illustrata: `GUIDA_ORPHEUS.html` nello zip (anche in `tools/pacchetto/`). Istruzioni in breve:
 `tools/pacchetto/LEGGIMI.txt`.
 
-Versione: 0.74.1
+Versione: 0.76.0

@@ -155,7 +155,7 @@ a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       <li><b>Rispondi a due domande</b>
         <div class="screen"><span class="q">Cartella dei dati</span><span>Invio = <code>C:\ORPHEUS_DATI</code></span><span class="q">La tua e-mail</span><span>per Crossref e OpenAlex, resta sul PC</span></div></li>
     </ol>
-    <div class="rule-box"><b>Alla fine</b><span>Sul desktop trovi l'icona <b>ORPHEUS</b>: apre il cruscotto nel browser. I comandi sono in <code>C:\ORPHEUS</code>. La cartella estratta dallo zip si può cancellare.</span></div>
+    <div class="rule-box"><b>Alla fine</b><span>Sul desktop trovi l'icona <b>ORPHEUS</b>: apre il cruscotto nel browser. I comandi sono in <b>Comandi di ORPHEUS</b> (desktop e menu Start). La cartella estratta dallo zip si può cancellare.</span></div>
   </section>
 
   <section class="band" id="aggiorna">
@@ -166,11 +166,12 @@ a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     </div>
     <ol class="steps" style="--n:4">
       <li><b>Chiudi ORPHEUS</b><span>Chiudi la finestra del cruscotto e gli altri comandi aperti.</span></li>
-      <li><b>Doppio clic su aggiorna.cmd</b><span>In <code>C:\ORPHEUS</code>. Controlla su GitHub l'ultima versione.</span>
+      <li><b>Menu Start &gt; ORPHEUS &gt; Aggiorna</b><span>È <code>aggiorna.cmd</code>. Controlla su GitHub l'ultima versione.</span>
         <div class="screen"><span>ORPHEUS installato: versione 0.54.1</span><span class="q">Ultima versione pubblicata: …</span></div></li>
       <li><b>Scarica e installa</b><span>Se c'è una versione nuova la scarica e la installa da sola. Se no scrive <em>Hai già l'ultima versione</em>.</span></li>
-      <li><b>Database aggiornato</b><span>Se la struttura cambia, prima fa una copia di sicurezza in <code>C:\ORPHEUS\locale</code>.</span></li>
+      <li><b>Database aggiornato</b><span>Se la struttura cambia, prima fa una copia di sicurezza in <code>%LOCALAPPDATA%\ORPHEUS\locale</code>.</span></li>
     </ol>
+    <p class="foot">Per togliere ORPHEUS dal PC: menu Start &gt; ORPHEUS &gt; Disinstalla. Toglie il programma, mai la cartella dei tuoi dati.</p>
   </section>
 
   <section class="band" id="condividi">
@@ -207,7 +208,7 @@ a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     </div>
     <div class="rule-box"><b>Quello che hai già resta tuo</b><span>Lo stesso articolo (DOI), la stessa rivista (ISSN), lo stesso PDF non cambiano. Una scheda arriva solo se tu non ce l'hai. Prima dell'unione c'è sempre una copia di sicurezza. Importare due volte lo stesso file non aggiunge nulla.</span></div>
     <div class="rule-box warn"><b>Il file contiene testo di articoli non aperti</b><span>Mandalo solo a colleghi con gli stessi accessi agli articoli. Mai su internet, mai su GitHub.</span></div>
-    <p class="foot">Senza cruscotto: <code>esporta_schede.cmd</code> e <code>importa_schede.cmd</code> in <code>C:\ORPHEUS</code> (si può trascinare lo zip sopra <code>importa_schede.cmd</code>).</p>
+    <p class="foot">Senza cruscotto: <code>esporta_schede.cmd</code> e <code>importa_schede.cmd</code> in <b>Comandi di ORPHEUS</b> (si può trascinare lo zip sopra <code>importa_schede.cmd</code>).</p>
   </section>
 
   <div class="tables">
@@ -229,11 +230,14 @@ a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     </section>
     <section class="band">
       <h2>Dove stanno le cose</h2>
-<pre class="tree">C:\ORPHEUS\                <em>il programma</em>
+<pre class="tree">%LOCALAPPDATA%\Programs\ORPHEUS\   <em>il programma ("Comandi di ORPHEUS")</em>
 ├─ cruscotto.cmd           <em>apre il cruscotto</em>
 ├─ aggiorna.cmd
 ├─ esporta_schede.cmd
 ├─ importa_schede.cmd
+└─ disinstalla_orpheus.cmd <em>toglie il programma, non i dati</em>
+
+%LOCALAPPDATA%\ORPHEUS\            <em>cose di questo PC</em>
 ├─ registri\               <em>un file per comando</em>
 └─ locale\backups\         <em>copie di sicurezza</em>
 
@@ -250,9 +254,9 @@ C:\ORPHEUS_DATI\           <em>i tuoi dati</em>
   <section class="band">
     <h2>Se qualcosa non va</h2>
     <div class="help">
-      <div><b>Un comando dà errore</b><span>Il dettaglio è in <code>C:\ORPHEUS\registri</code>; l'installazione in <code>C:\ORPHEUS\installazione_log.txt</code>.</span></div>
+      <div><b>Un comando dà errore</b><span>Il dettaglio è in <code>%LOCALAPPDATA%\ORPHEUS\registri</code>; l'installazione in <code>%LOCALAPPDATA%\ORPHEUS\installazione_log.txt</code>.</span></div>
       <div><b>La ricerca per significato non parte</b><span>Installa <em>Microsoft Visual C++ Redistributable</em> (x64) dal sito Microsoft, poi riprova.</span></div>
-      <div><b>Le verifiche online non partono</b><span>Manca l'e-mail: aggiungi <code>ORPHEUS_CONTACT_EMAIL=…</code> in <code>C:\ORPHEUS\orpheus\.env</code>.</span></div>
+      <div><b>Le verifiche online non partono</b><span>Manca l'e-mail: aggiungi <code>ORPHEUS_CONTACT_EMAIL=…</code> in <code>%LOCALAPPDATA%\Programs\ORPHEUS\orpheus\.env</code>.</span></div>
     </div>
   </section>
 

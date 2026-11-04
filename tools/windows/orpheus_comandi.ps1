@@ -90,21 +90,26 @@
 #              controlla le sezioni scritte, apre l'anteprima e registra l'approvazione; nel registro solo gli stati
 #   report     pagina HTML di stato in rapporti\report_<data>.html (orpheus report, T-015): documenti, copertura per
 #              rivista, verifiche, citazioni, schede; solo lettura, non modifica il database; la apre nel browser
-# Tutto viene scritto anche in C:\ORPHEUS\registri\<comando>_<data>.txt; alla fine il registro viene inviato
+# Tutto viene scritto anche in %LOCALAPPDATA%\ORPHEUS\registri\<comando>_<data>.txt; alla fine il registro viene inviato
 # anche a GitHub (ramo registri-pc, pubblica_registro.ps1), dove lo legge il loop di Claude nel cloud.
-# Questi file sono copiati in C:\ORPHEUS dall'installatore: le versioni aggiornate arrivano con installa_orpheus.cmd.
+# Questi file sono copiati nella cartella del programma (%LOCALAPPDATA%\Programs\ORPHEUS) dall'installatore: le versioni aggiornate arrivano con installa_orpheus.cmd.
 
 param([Parameter(Mandatory = $true)][ValidateSet('leggi', 'cerca', 'controllo', 'verifica', 'verifica_pubmed', 'benchmark', 'doppioni', 'autori', 'europepmc', 'riferimenti', 'verifica_citazioni', 'pacchetti', 'schede', 'controllo_schede', 'report', 'prova_ripristino', 'riviste', 'schede_riviste', 'metriche_riviste', 'semantica', 'benchmark_ricerca', 'affermazioni', 'lavora', 'cruscotto', 'manoscritto', 'schede_locali', 'nuovo_articolo', 'chat_schede', 'revisione', 'lettera', 'risposta', 'validazione', 'aggiorna_articoli', 'aggiorna_riviste', 'invia_lavoro_claude', 'manutenzione', 'prepara_manoscritto', 'invia_schede_chat', 'revisione_sistematica', 'scheda_unica', 'esporta_schede', 'importa_schede', 'metodi', 'obiettivi', 'riscontri')][string]$Comando,
       [string]$File = '')
 
 $ErrorActionPreference = 'Continue'
-$Root    = if ($env:ORPHEUS_TOOLS_ROOT) { $env:ORPHEUS_TOOLS_ROOT } else { 'C:\ORPHEUS' }   # variabile solo per i test
+$Root    = if ($env:ORPHEUS_TOOLS_ROOT) { $env:ORPHEUS_TOOLS_ROOT } else { $PSScriptRoot }   # variabile solo per i test
+# Cose di questo PC (registri): %LOCALAPPDATA%\ORPHEUS dal 2026-11-04; nei test e nelle vecchie installazioni accanto ai comandi.
+$StateDir = if ($env:ORPHEUS_STATE_DIR) { $env:ORPHEUS_STATE_DIR }
+            elseif (-not $env:ORPHEUS_TOOLS_ROOT -and $env:LOCALAPPDATA -and
+                    $Root -eq (Join-Path $env:LOCALAPPDATA 'Programs\ORPHEUS')) { Join-Path $env:LOCALAPPDATA 'ORPHEUS' }
+            else { $Root }
 $CodeDir = Join-Path $Root 'orpheus'
 # .venv: installazione con git (PC dell'utente); python\: pacchetto pubblico con Python incluso (PC dei colleghi, T-053)
 $VenvPy  = @((Join-Path $CodeDir '.venv\Scripts\python.exe'), (Join-Path $CodeDir '.venv/bin/python'),
              (Join-Path $Root 'python\python.exe')) |
            Where-Object { Test-Path $_ } | Select-Object -First 1
-$LogDir  = Join-Path $Root 'registri'
+$LogDir  = Join-Path $StateDir 'registri'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 if (-not $VenvPy) {

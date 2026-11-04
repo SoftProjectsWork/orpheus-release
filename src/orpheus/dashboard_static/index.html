@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cruscotto ORPHEUS</title>
 <link rel="stylesheet" href="/static/app.css">
-<script>try{var d=document.documentElement,st=localStorage.getItem("orpheus-stile"),c=localStorage.getItem("orpheus-contrasto"),css=localStorage.getItem("orpheus-stili-css");if(st)d.setAttribute("data-style",st);if(c)d.setAttribute("data-contrast",c);if(css){var e=document.createElement("style");e.id="custom-styles";e.textContent=css;document.head.appendChild(e)}}catch(e){}</script>
+<script>try{var d=document.documentElement,st=localStorage.getItem("orpheus-stile"),c=localStorage.getItem("orpheus-contrasto"),css=localStorage.getItem("orpheus-stili-css");if(st)d.setAttribute("data-style",st);if(c)d.setAttribute("data-contrast",c);if(css){var e=document.createElement("style");e.id="custom-styles";e.textContent=css;document.head.appendChild(e)}var sc=localStorage.getItem("orpheus-scala")||"auto",z=sc==="auto"?Math.round(Math.min(1.25,Math.max(.85,Math.min(innerWidth/1440,innerHeight/860)))*20)/20:Math.min(1.5,Math.max(.7,parseFloat(sc)||1));d.style.zoom=z;d.style.setProperty("--z",z)}catch(e){}</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d6b58'/%3E%3Cpath d='M8%206.5C11.9%206.5%2013.5%2010.1%2013.1%2013.6C12.8%2016.4%2011%2018.9%207.5%2020M24%206.5C20.1%206.5%2018.5%2010.1%2018.9%2013.6C19.2%2016.4%2021%2018.9%2024.5%2020M7.5%2020H24.5M16%2020V26.5' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body data-token="__ORPHEUS_TOKEN__" data-version="__ORPHEUS_VERSION__" data-dev="__ORPHEUS_DEV__">
@@ -48,6 +48,14 @@
             <option value="terra" data-i18n="Terra">Terra</option>
           </select>
         </label>
+        <p class="set-label" data-i18n="Dimensione">Dimensione</p>
+        <div class="theme scale" role="group" aria-label="Dimensione" data-i18n-aria="Dimensione">
+          <button type="button" data-scale-set="auto" aria-pressed="true" data-i18n="Auto">Auto</button>
+          <button type="button" data-scale-set="0.9" aria-pressed="false">90%</button>
+          <button type="button" data-scale-set="1" aria-pressed="false">100%</button>
+          <button type="button" data-scale-set="1.1" aria-pressed="false">110%</button>
+          <button type="button" data-scale-set="1.25" aria-pressed="false">125%</button>
+        </div>
         <p class="set-label" data-i18n="Contrasto">Contrasto</p>
         <div class="theme" role="group" aria-label="Contrasto" data-i18n-aria="Contrasto">
           <button type="button" data-contrast-set="normale" aria-pressed="true" data-i18n="Normale">Normale</button>

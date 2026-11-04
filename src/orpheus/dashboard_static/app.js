@@ -261,12 +261,12 @@ const tip = document.getElementById("tooltip");
 function showTip(evt, nodes) {
   put(tip, ...nodes);
   tip.hidden = false;
-  const pad = 14, w = tip.offsetWidth, hgt = tip.offsetHeight;
+  const z = zoomNow(), pad = 14, w = tip.offsetWidth * z, hgt = tip.offsetHeight * z;   // window pixels
   let x = evt.clientX + pad, y = evt.clientY + pad;
   if (x + w > window.innerWidth - 8) x = evt.clientX - w - pad;
   if (y + hgt > window.innerHeight - 8) y = evt.clientY - hgt - pad;
-  tip.style.left = `${Math.max(8, x)}px`;
-  tip.style.top = `${Math.max(8, y)}px`;
+  tip.style.left = `${Math.max(8, x) / z}px`;
+  tip.style.top = `${Math.max(8, y) / z}px`;
 }
 function hideTip() { tip.hidden = true; }
 
@@ -429,7 +429,7 @@ function actionPanel(info, key, opts = {}) {
     h("button", {class: "btn", type: "button", onclick: () => { confirmBox.hidden = true; startBtn.hidden = false; startBtn.focus(); }}, "Annulla"));
   const steps = h("ol", {class: "action-steps"}, a.passi.map((x) => h("li", null, x.titolo)));
   let why = null;
-  if (!info.avvio.disponibile) why = "Per avviare da qui apri il cruscotto con cruscotto.cmd (in C:\\ORPHEUS).";
+  if (!info.avvio.disponibile) why = "Per avviare da qui apri il cruscotto con ORPHEUS (desktop o menu Start).";
   else if (busyOther) why = `Adesso è in corso: ${info.avvio.titolo}. Aspetta che finisca.`;
   else if (busyPc) why = `lavora è già in corso in un'altra finestra (dal ${fmtDate(info.in_corso_sul_pc.iniziato)}).`;
   append(box, [h("div", {class: "block-head"}, h("h2", null, title), stateLine),
@@ -437,7 +437,7 @@ function actionPanel(info, key, opts = {}) {
     opts.controls || null,
     h("div", {class: "action-row"}, startBtn, h("details", {class: "action-more"}, h("summary", null, `${a.passi.length} passi, in ordine`), steps)),
     why ? h("p", {class: "muted"}, why) : null, confirmBox, consoleBox,
-    h("p", {class: "src"}, `Come il doppio clic su ${a.comando}: registro in C:\\ORPHEUS\\registri, inviato anche a Claude.`)]);
+    h("p", {class: "src"}, `Come il doppio clic su ${a.comando}: registro in AppData\\Local\\ORPHEUS\\registri, inviato anche a Claude.`)]);
   if (mine) { consoleBox.hidden = false; consoleNext = 0; follow(consoleBox, stateLine, startBtn); }
   return box;
 }
@@ -1647,12 +1647,12 @@ sections.funzioni = async () => {
     }}, "Sì, avvia lavora"), " ",
     h("button", {class: "btn", type: "button", onclick: () => { confirmBox.hidden = true; startBtn.hidden = false; startBtn.focus(); }}, "Annulla"));
   let why = null;
-  if (!d.avvio.disponibile) why = "Per avviare lavora da qui apri il cruscotto con cruscotto.cmd (in C:\\ORPHEUS).";
+  if (!d.avvio.disponibile) why = "Per avviare lavora da qui apri il cruscotto con ORPHEUS (desktop o menu Start).";
   else if (busyElsewhere) why = `lavora.cmd è già in corso in un'altra finestra (dal ${fmtDate(d.in_corso_sul_pc.iniziato)}, passo ${d.in_corso_sul_pc.passo || "—"}).`;
   append(startBox, [h("div", {class: "block-head"}, h("h2", {id: "h-start"}, "Avvia lavora"), stateLine),
     h("p", {class: "muted"}, "Lo stesso di lavora.cmd: una copia di sicurezza, poi in ordine tutti i passi che hanno qualcosa da fare. Rilanciarlo è sicuro."),
     startBtn, why ? h("p", {class: "muted"}, why) : null, confirmBox, consoleBox,
-    h("p", {class: "src"}, "Ogni avvio scrive un registro in C:\\ORPHEUS\\registri e lo invia a Claude, come lavora.cmd.")]);
+    h("p", {class: "src"}, "Ogni avvio scrive un registro in AppData\\Local\\ORPHEUS\\registri e lo invia a Claude, come lavora.cmd.")]);
   const lavoraKids = [startBox];
   if (d.avvio.in_corso || d.avvio.prossima) { consoleNext = 0; follow(consoleBox, stateLine, startBtn); }
 
@@ -4345,9 +4345,9 @@ let jTimer = null, jEl = null;
 function jShow(el) {
   put(tip, h("b", null, el.dataset.jname));
   tip.hidden = false;
-  const r = el.getBoundingClientRect(), w = tip.offsetWidth;
-  tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
-  tip.style.top = `${r.bottom + 6 + tip.offsetHeight > window.innerHeight ? r.top - tip.offsetHeight - 6 : r.bottom + 6}px`;
+  const z = zoomNow(), r = el.getBoundingClientRect(), w = tip.offsetWidth * z, th = tip.offsetHeight * z;  // window pixels
+  tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) / z}px`;
+  tip.style.top = `${(r.bottom + 6 + th > window.innerHeight ? r.top - th - 6 : r.bottom + 6) / z}px`;
 }
 function jHide() { clearTimeout(jTimer); if (jEl) { jEl = null; hideTip(); } }
 function jStart(el) {
@@ -4364,6 +4364,33 @@ document.addEventListener("focusin", (e) => { const el = e.target.closest("[data
 document.addEventListener("focusout", jHide);
 window.addEventListener("scroll", jHide, true);
 window.addEventListener("hashchange", jHide);
+})();
+
+/* ------------------------------------------------------------------ Dimensione (2026-11-04): the page scales with the
+   window (Auto: between 85% and 125%, reference 1440 x 860) or at a size chosen in Impostazioni, kept in this browser.
+   CSS zoom on <html>; --z divides the vh heights so the sidebar and the sticky panels still fit the window. */
+const SCALE_KEY = "orpheus-scala";
+function scaleSaved() { try { return localStorage.getItem(SCALE_KEY) || "auto"; } catch (e) { return "auto"; } }
+function scaleFactor(choice) {
+  if (choice !== "auto") return Math.min(1.5, Math.max(0.7, parseFloat(choice) || 1));
+  const f = Math.min(window.innerWidth / 1440, window.innerHeight / 860);
+  return Math.round(Math.min(1.25, Math.max(0.85, f)) * 20) / 20;
+}
+function zoomNow() { return parseFloat(document.documentElement.style.zoom) || 1; }
+function applyScale() {
+  const choice = scaleSaved(), z = scaleFactor(choice), d = document.documentElement;
+  d.style.zoom = String(z);
+  d.style.setProperty("--z", String(z));
+  document.querySelectorAll("[data-scale-set]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.scaleSet === choice)));
+}
+(() => {
+  document.querySelectorAll("[data-scale-set]").forEach((b) => b.addEventListener("click", () => {
+    try { localStorage.setItem(SCALE_KEY, b.dataset.scaleSet); } catch (e) { /* not available */ }
+    applyScale();
+  }));
+  let t = 0;
+  window.addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => { if (scaleSaved() === "auto") applyScale(); }, 150); });
+  applyScale();
 })();
 
 /* ------------------------------------------------------------------ Impostazioni (2026-11-03): the gear opens theme,

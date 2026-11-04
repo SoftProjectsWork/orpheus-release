@@ -12,24 +12,33 @@ INSTALLARE (la prima volta)
 3. Rispondi alle due domande:
    - cartella dei dati (Invio = C:\ORPHEUS_DATI): li' staranno database, PDF e schede;
    - la tua e-mail: la chiedono Crossref e OpenAlex per le verifiche; resta solo sul tuo PC.
-4. Alla fine trovi "ORPHEUS" sul desktop (il cruscotto) e i comandi in C:\ORPHEUS.
+4. Alla fine trovi sul desktop e nel menu Start > ORPHEUS: "ORPHEUS" (il cruscotto) e "Comandi di ORPHEUS"
+   (la cartella dei comandi a doppio clic, in %LOCALAPPDATA%\Programs\ORPHEUS). Non servono permessi di amministratore.
 La cartella estratta dallo zip si puo' cancellare.
 
 AGGIORNARE
-- Doppio clic su C:\ORPHEUS\aggiorna.cmd (serve internet). Scarica l'ultima versione e la installa.
+- Menu Start > ORPHEUS > Aggiorna ORPHEUS (serve internet). Scarica l'ultima versione e la installa.
   I tuoi dati non vengono toccati; il database viene aggiornato con una copia di sicurezza prima.
 
 RICEVERE LE SCHEDE DI UN COLLEGA
 1. Metti il file ORPHEUS_condivisione_....zip ricevuto in <cartella dei dati>\inbox\condivisione
-   (oppure trascinalo sopra C:\ORPHEUS\importa_schede.cmd).
-2. Doppio clic su C:\ORPHEUS\importa_schede.cmd: ti mostra cosa entrerebbe, poi chiede S/N.
+   (oppure trascinalo sopra importa_schede.cmd, in "Comandi di ORPHEUS").
+2. Doppio clic su importa_schede.cmd (in "Comandi di ORPHEUS"): ti mostra cosa entrerebbe, poi chiede S/N.
    Quello che hai gia' resta tuo: si aggiungono solo le riviste, gli articoli, le schede e i pezzi di testo che mancano.
 
 MANDARE LE TUE SCHEDE A UN COLLEGA
-- Doppio clic su C:\ORPHEUS\esporta_schede.cmd: crea il file in <cartella dei dati>\condivisione.
+- Doppio clic su esporta_schede.cmd (in "Comandi di ORPHEUS"): crea il file in <cartella dei dati>\condivisione.
   Contiene testo di articoli non aperti: mandalo solo a colleghi con gli stessi accessi, MAI su internet o GitHub.
   Non contiene PDF ne' manoscritti.
 
 SE QUALCOSA NON VA
-- Ogni comando scrive un registro in C:\ORPHEUS\registri; l'installazione in C:\ORPHEUS\installazione_log.txt.
+- Ogni comando scrive un registro in %LOCALAPPDATA%\ORPHEUS\registri; l'installazione in
+  %LOCALAPPDATA%\ORPHEUS\installazione_log.txt (scrivi %LOCALAPPDATA% nella barra degli indirizzi di Esplora file).
+
+TOGLIERE ORPHEUS
+- Menu Start > ORPHEUS > Disinstalla ORPHEUS. I dati restano; le copie di sicurezza si possono conservare.
+
+DA UNA VERSIONE PRIMA DELLA 0.76.0 (tutto in C:\ORPHEUS)
+- Il primo aggiornamento sposta ORPHEUS da solo nelle cartelle nuove e toglie C:\ORPHEUS (resta solo quello che non e'
+  di ORPHEUS, con un file LEGGIMI_ORPHEUS_SPOSTATO.txt). I dati non si muovono.
 - Se la ricerca per significato non parte, installa "Microsoft Visual C++ Redistributable" (x64) dal sito Microsoft.
