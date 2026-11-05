@@ -49,12 +49,15 @@ def _pct(n: int, total: int) -> float | None:
 def _analysed(conn: sqlite3.Connection, rules: str) -> list[sqlite3.Row]:
     return list(conn.execute(
         """SELECT s.*, a.journal_id, a.publication_year AS year FROM text_structure s
-           JOIN article a ON a.id = s.article_id WHERE s.rules = ? AND a.journal_id IS NOT NULL""", (rules,)))
+           JOIN article a ON a.id = s.article_id WHERE s.rules = ? AND a.journal_id IS NOT NULL
+              AND a.integrity_status <> 'retracted'""", (rules,)))
 
 
 def _items(conn: sqlite3.Connection, rules: str) -> dict[str, list[sqlite3.Row]]:
     by_article: dict[str, list[sqlite3.Row]] = {}
-    for r in conn.execute("SELECT article_id, grp, term, detail FROM text_method_item WHERE rules = ?", (rules,)):
+    for r in conn.execute("""SELECT i.article_id, i.grp, i.term, i.detail FROM text_method_item i
+                               JOIN article a ON a.id = i.article_id
+                               WHERE i.rules = ? AND a.integrity_status <> 'retracted'""", (rules,)):
         by_article.setdefault(r["article_id"], []).append(r)
     return by_article
 
@@ -273,7 +276,7 @@ def examples(conn: sqlite3.Connection, journal_id: str, term: str, *, limit: int
         """SELECT i.article_id, a.title, a.doi, a.publication_year AS anno, i.page_no AS pagina, i.section AS sezione,
                   i.detail AS dettaglio, i.quote AS frase
            FROM text_method_item i JOIN article a ON a.id = i.article_id
-           WHERE a.journal_id = ? AND i.term = ? AND i.rules = ?
+           WHERE a.journal_id = ? AND i.term = ? AND i.rules = ? AND a.integrity_status <> 'retracted'
            ORDER BY a.publication_year DESC, a.id, i.page_no LIMIT ?""", (journal_id, term, rules, limit))]
 
 

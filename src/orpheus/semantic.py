@@ -272,11 +272,13 @@ def ranked_segments(conn: sqlite3.Connection, text: str, mode: str, *, embedder=
 
 
 def by_article(conn: sqlite3.Connection, segment_ids: list[str], limit: int = 10) -> list[dict]:
-    """The ranked segments grouped by article (best segment first), with title, DOI, page, section and start."""
+    """The ranked segments grouped by article (best segment first), with title, DOI, page, section and start.
+    A retracted article is never shown (retractions.py)."""
     out, seen = [], {}
     for sid in segment_ids:
         r = conn.execute("""SELECT s.article_id, s.page_from, s.page_to, s.section, s.text, a.title, a.doi, a.publication_year AS year
-                            FROM segment s LEFT JOIN article a ON a.id = s.article_id WHERE s.id = ?""", (sid,)).fetchone()
+                            FROM segment s LEFT JOIN article a ON a.id = s.article_id
+                            WHERE s.id = ? AND (a.id IS NULL OR a.integrity_status <> 'retracted')""", (sid,)).fetchone()
         if r is None:
             continue
         key = r["article_id"] or sid

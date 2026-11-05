@@ -256,7 +256,8 @@ def candidates(conn: sqlite3.Connection, *, seed: str = SEED, left_out: list | N
         mesh.setdefault(r[0], []).append(r[1])
     out = []
     for a in conn.execute("""SELECT a.id, a.title, a.abstract, a.doi, a.journal_id, j.title AS journal
-                             FROM article a LEFT JOIN journal j ON j.id = a.journal_id"""):
+                             FROM article a LEFT JOIN journal j ON j.id = a.journal_id
+                             WHERE a.integrity_status <> 'retracted'"""):
         aid = a["id"]
         if aid not in docs or aid not in analysed or aid in skip or (a["doi"] or "").lower() in by_hand \
                 or types.get(aid, set()) & card_store.EXCLUDED_TYPES or card_store._EXCLUDED_TITLE.search(a["title"] or ""):

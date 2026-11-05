@@ -1833,6 +1833,22 @@ def cmd_search(args) -> int:
 
 # ---------------------------------------------------------------- article cards (T-019)
 
+def cmd_retract_article(args) -> int:
+    from . import retractions
+    ctx = _open(write=args.applica)
+    try:
+        if not args.applica:
+            _print({"modo": "prova", **retractions.plan(ctx.conn, args.doi), **_finish(ctx, wrote=False)})
+            return 0
+        entry = backups.make_backup(ctx.conn, ctx.state, reason="before_retraction")
+        out = retractions.retract(ctx.conn, ctx.home, args.doi, reason=args.motivo)
+    except ValueError as e:
+        raise CliError(str(e)) from e
+    _print({"modo": "applicato", **out, "backup_prima_della_scrittura": str(ctx.state.backup_dir / entry["file"]),
+            **_finish(ctx, wrote=True)})
+    return 0
+
+
 def cmd_packets(args) -> int:
     ctx = _open(write=True)
     closed = card_store.close_excluded_packets(ctx.conn, ctx.home)     # who is on config/schede_esclusi.yaml has no open packet
@@ -2580,6 +2596,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("benchmark-risultati")
     p.add_argument("file", nargs="?", default=None, help="the filled file (default: the newest one in rapporti)")
     p.set_defaults(func=cmd_benchmark_results)
+    p = sub.add_parser("ritira-articolo", help="an article retracted by its journal leaves searches, profiles and lots")
+    p.add_argument("doi")
+    p.add_argument("--motivo", required=True, help="why: it goes in the audit register")
+    p.add_argument("--applica", action="store_true", help="write (with a backup first); without it only a trial")
+    p.set_defaults(func=cmd_retract_article)
     p = sub.add_parser("pacchetti")
     p.add_argument("--articoli", nargs="+", default=None, metavar="ID", help="these articles instead of the first lot")
     p.add_argument("--lotto", type=int, default=card_store.NEXT_LOT,

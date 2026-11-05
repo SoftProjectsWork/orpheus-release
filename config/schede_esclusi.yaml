@@ -1,6 +1,7 @@
 # Articoli senza scheda cards-v1 (T-019, ADR-0008, T-058), letti a mano: cards-v1 vuole un numero di partecipanti scritto nel testo.
 # tipo: non_studio (narrativi, proposte, note tecniche) | senza_partecipanti (modelli, fisica, manichini, analisi su dati pubblicati)
 #       | caso_singolo (studio vero su un solo soggetto, il numero non è scritto: scheda possibile solo con regole nuove).
+#       | ritrattato (ritirato dalla rivista: vale anche `orpheus ritira-articolo`, che lo toglie da ricerche e profili)
 # Il sorteggio prende il successivo nell'ordine del seme; `pacchetti.cmd` chiude il loro pacchetto aperto (con il motivo; il file va in
 # rapporti\pacchetti\chiusi). Togliere una riga rimette l'articolo nel sorteggio. Ogni cambio è una decisione da registrare in CHANGELOG.md.
 esclusi:
@@ -72,3 +73,7 @@ esclusi:
     tipo: caso_singolo
     motivo: "metodo di misura provato con 10 tiri di un solo soggetto: il numero dei soggetti non è scritto"
     deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/s1440-2440(00)80003-1
+    tipo: ritrattato
+    motivo: "versione del 2000 ritirata e ripubblicata: resta la versione corretta 10.1016/s1440-2440(01)80003-7"
+    deciso: "2026-11-05, decisione dell'utente dopo il controllo del conflitto tra le due schede"

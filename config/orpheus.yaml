@@ -2,7 +2,7 @@
 # Changing a value here is a configuration change: record it in CHANGELOG.md.
 project:
   name: ORPHEUS
-  version: 0.78.2                  # uguale a pyproject.toml e a src/orpheus/__init__.py (controllato da un test)
+  version: 0.78.3                  # uguale a pyproject.toml e a src/orpheus/__init__.py (controllato da un test)
   responsible_human: SoftProjectsWork   # decisione dell'utente del 2026-11-05 (R9); questo file va anche nel pacchetto pubblico
   language: it
   research_domains:

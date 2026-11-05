@@ -57,7 +57,7 @@ TASK_KEY = "T-019:{version}:{article_id}"
 EXCLUDED_TYPES = {"Review", "Systematic Review", "Meta-Analysis", "Consensus Statement", "Practice Guideline", "Guideline",
                   "Editorial", "Comment", "Letter", "Published Erratum", "Retraction of Publication", "Scoping Review"}
 EXCLUSIONS_FILE = ROOT / "config" / "schede_esclusi.yaml"
-EXCLUSION_KINDS = ("non_studio", "senza_partecipanti", "caso_singolo")
+EXCLUSION_KINDS = ("non_studio", "senza_partecipanti", "caso_singolo", "ritrattato")
 CLOSED_DIR = "chiusi"
 _EXCLUDED_TITLE = re.compile(r"\b(review|meta-analys[ie]s|consensus|position stand|position statement|editorial|"
                              r"corrigendum|erratum|letter to the editor)\b", re.I)
@@ -120,7 +120,8 @@ def lot(conn: sqlite3.Connection, *, n_open: int = LOT_OPEN, n_sample: int = LOT
         excluded_dois: dict[str, str] | None = None) -> dict:
     by_hand = {k.strip().lower(): v for k, v in (exclusions() if excluded_dois is None else excluded_dois).items()}
     docs = _complete_documents(conn)
-    full = {r[0]: r for r in conn.execute("SELECT id, title, doi FROM article WHERE access_level = 'full_text'")}
+    full = {r[0]: r for r in conn.execute("SELECT id, title, doi FROM article WHERE access_level = 'full_text' "
+                                                       "AND integrity_status <> 'retracted'")}
     eligible = [a for a in docs if a in full]
     open_ids = sorted(a for a in eligible if jats_snapshot(conn, a))[:n_open]
     types: dict[str, set[str]] = {}
@@ -430,7 +431,8 @@ def next_lot(conn: sqlite3.Connection, size: int = NEXT_LOT, *, seed: str = SEED
     exclusions as the first lot (publication type, title, by hand). Read-only."""
     by_hand = {k.strip().lower(): v for k, v in (exclusions() if excluded_dois is None else excluded_dois).items()}
     docs = _complete_documents(conn)
-    full = {r[0]: r for r in conn.execute("SELECT id, title, doi FROM article WHERE access_level = 'full_text'")}
+    full = {r[0]: r for r in conn.execute("SELECT id, title, doi FROM article WHERE access_level = 'full_text' "
+                                                       "AND integrity_status <> 'retracted'")}
     types: dict[str, set[str]] = {}
     for r in conn.execute("SELECT article_id, type_name FROM article_publication_type"):
         types.setdefault(r[0], set()).add(r[1])
