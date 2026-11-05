@@ -47,6 +47,19 @@ try {
         Write-Host ("Scarico {0} ({1:N0} MB)..." -f $asset.name, ($asset.size / 1MB))
         $ProgressPreference = 'SilentlyContinue'      # molto piu' veloce in Windows PowerShell 5.1
         Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $Pacchetto -Headers @{ 'User-Agent' = 'ORPHEUS-aggiorna' }
+        # Impronta pubblicata con lo zip (dalla 0.77.0; le versioni piu' vecchie non ce l'hanno): file rovinato = stop.
+        $impronta = @($rel.assets | Where-Object { $_.name -eq "$($asset.name).sha256" }) | Select-Object -First 1
+        if ($impronta) {
+            $fileImpronta = Join-Path $work $impronta.name
+            Invoke-WebRequest -Uri $impronta.browser_download_url -OutFile $fileImpronta -Headers @{ 'User-Agent' = 'ORPHEUS-aggiorna' }
+            $attesa = ((Get-Content $fileImpronta -TotalCount 1) -split '\s+')[0]
+            $trovata = (Get-FileHash $Pacchetto -Algorithm SHA256).Hash
+            if ($attesa -ine $trovata) {
+                Write-Host 'Il pacchetto scaricato e'' rovinato (impronta diversa): niente aggiornamento. Riprova.'
+                exit 2
+            }
+            Write-Host 'Impronta del pacchetto controllata.'
+        }
     }
     Write-Host 'Estraggo il pacchetto...'
     Expand-Archive -Path $Pacchetto -DestinationPath $work -Force

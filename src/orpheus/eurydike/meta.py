@@ -31,7 +31,7 @@ from . import ma_plots
 from . import review as rv
 from . import store
 from .core import ma_core
-from .core.stats import REPORTED, num, row_problems, to_mean_sd
+from .core.stats import num, row_problems, to_mean_sd
 
 MA_DIR = "meta_analisi"
 USABLE_STATES = ("confirmed", "edited")
@@ -67,13 +67,18 @@ def _included(conn: sqlite3.Connection, review_id: str) -> list[dict]:
 # ================================================================================================ E8: rows and conversions
 
 def _mean_sd(row: dict) -> dict:
-    """Mean and SD of one row, with the method. A reported mean and SD keep all their decimals (no rounding)."""
-    conv = to_mean_sd(row)
+    """Mean and SD of one row, with the method. Nothing is rounded here, reported or converted: the numbers shown are
+    rounded by the page and by the report (_show)."""
+    conv = to_mean_sd(row, exact=True)
     if conv is None:
         return {"media": None, "ds": None, "metodo": None}
-    if conv["method"] == REPORTED:
-        return {"media": num(row.get("mean")), "ds": num(row.get("sd")), "metodo": REPORTED}
     return {"media": conv["mean"], "ds": conv["sd"], "metodo": conv["method"]}
+
+
+def _show(value) -> str:
+    """A stored number as the report shows it: six significant digits (the stored value keeps all of them)."""
+    x = num(value)
+    return str(value) if x is None else f"{x:.6g}"
 
 
 def row_view(r: dict) -> dict:
@@ -427,8 +432,8 @@ def write_report(conn: sqlite3.Connection, home: Path, review_id: str, analysis_
     f3 = lambda x: "—" if x is None else (f"{x:.3f}" if x >= 0.001 else "<0.001")  # noqa: E731
     e = html.escape
     rows = "".join(
-        f"<tr><td>{e(st['label'])}</td><td>{e(str(x['media_e']))} ± {e(str(x['ds_e']))} (n={e(str(x['n_e']))})"
-        f"<br><small>{e(x['metodo_e'])}</small></td><td>{e(str(x['media_c']))} ± {e(str(x['ds_c']))} "
+        f"<tr><td>{e(st['label'])}</td><td>{e(_show(x['media_e']))} ± {e(_show(x['ds_e']))} (n={e(str(x['n_e']))})"
+        f"<br><small>{e(x['metodo_e'])}</small></td><td>{e(_show(x['media_c']))} ± {e(_show(x['ds_c']))} "
         f"(n={e(str(x['n_c']))})<br><small>{e(x['metodo_c'])}</small></td><td>{f2(st['yi'])} [{f2(st['ci_low'])}; "
         f"{f2(st['ci_high'])}]</td><td>{st['weight']:.1f}%</td></tr>" for st, x in zip(res["studies"], d["input"]))
     loo = "".join(f"<tr><td>{e(x['label'])}</td><td>{f2(x['estimate'])} [{f2(x['ci_low'])}; {f2(x['ci_high'])}]</td>"

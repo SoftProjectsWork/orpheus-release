@@ -1,10 +1,74 @@
-# Articoli esclusi dal primo lotto delle schede (T-019, ADR-0008) perché, letti a mano, non sono studi originali
-# (regola dell'utente del 2026-10-11: "solo studi originali"). Il sorteggio prende il successivo nell'ordine del seme.
-# Aggiungere o togliere una riga cambia il lotto: è una decisione da registrare in CHANGELOG.md.
+# Articoli senza scheda cards-v1 (T-019, ADR-0008, T-058), letti a mano: cards-v1 vuole un numero di partecipanti scritto nel testo.
+# tipo: non_studio (narrativi, proposte, note tecniche) | senza_partecipanti (modelli, fisica, manichini, analisi su dati pubblicati)
+#       | caso_singolo (studio vero su un solo soggetto, il numero non è scritto: scheda possibile solo con regole nuove).
+# Il sorteggio prende il successivo nell'ordine del seme; `pacchetti.cmd` chiude il loro pacchetto aperto (con il motivo; il file va in
+# rapporti\pacchetti\chiusi). Togliere una riga rimette l'articolo nel sorteggio. Ogni cambio è una decisione da registrare in CHANGELOG.md.
 esclusi:
   - doi: 10.1016/s1440-2440(99)80174-1
+    tipo: non_studio
     motivo: "rassegna delle ricerche degli autori sulle vibrazioni (più studi riassunti, nessun metodo unico)"
     deciso: "2026-10-11, Claude in sessione T-019, leggendo la prima pagina"
   - doi: 10.1046/j.1460-9584.1997.00043.x
+    tipo: non_studio
     motivo: "articolo di rassegna (Review article) sulle misure di pressione plantare: nessun campione né risultati propri"
     deciso: "2026-10-19, Claude in sessione (schede degli articoli), leggendo la prima pagina"
+  - doi: 10.1016/s1440-2440(00)80041-9
+    tipo: non_studio
+    motivo: "articolo clinico narrativo sulla gestione del dolore: nessun metodo né campione propri"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/s1440-2440(00)80031-6
+    tipo: non_studio
+    motivo: "articolo narrativo sulla periodizzazione del training psicologico: nessun metodo né campione propri"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1046/j.1460-9584.1998.00073.x
+    tipo: non_studio
+    motivo: "rassegna narrativa sulle fratture da stress del piede"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/j.joca.2021.05.007
+    tipo: non_studio
+    motivo: "rassegna narrativa su costi e servizi sanitari dell'artrosi"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1136/bmjsem-2022-001384
+    tipo: non_studio
+    motivo: "proposta di un protocollo di valutazione della commozione: nessun dato raccolto"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/j.fas.2019.05.011
+    tipo: non_studio
+    motivo: "nota tecnica (Technical tip) su una tecnica chirurgica"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/s1440-2440(03)80014-2
+    tipo: senza_partecipanti
+    motivo: "analisi fisica del rimbalzo di una palla da tennis"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/s1440-2440(99)80178-9
+    tipo: senza_partecipanti
+    motivo: "modello energetico della strategia di gara nel ciclismo su pista"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/j.fas.2023.01.006
+    tipo: senza_partecipanti
+    motivo: "analisi decisionale su dati pubblicati: nessun paziente proprio"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/j.jsams.2020.04.019
+    tipo: senza_partecipanti
+    motivo: "prove su manichino Hybrid-III (38 prove): nessun partecipante umano"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/j.fas.2014.07.005
+    tipo: caso_singolo
+    motivo: "caso clinico di una sola paziente: il numero non è scritto"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/j.fas.2010.07.005
+    tipo: caso_singolo
+    motivo: "caso clinico di un solo paziente: il numero non è scritto"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1519/jsc.0000000000005519
+    tipo: caso_singolo
+    motivo: "studio di un solo atleta: il numero non è scritto"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/s1440-2440(01)80043-8
+    tipo: caso_singolo
+    motivo: "tecnica di misura provata su un solo velista: il numero non è scritto"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"
+  - doi: 10.1016/s1440-2440(02)80023-8
+    tipo: caso_singolo
+    motivo: "metodo di misura provato con 10 tiri di un solo soggetto: il numero dei soggetti non è scritto"
+    deciso: "2026-11-05, decisione dell'utente su T-058; motivo letto da Claude in sessione nel testo del pacchetto"

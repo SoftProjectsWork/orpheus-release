@@ -2,12 +2,14 @@
 reported outcome row to mean and standard deviation.
 
 The model never converts (principle 4): a row holds the statistics as written in the paper; this module derives
-mean and SD and writes the method next to them. Results are rounded to 3 decimals, half away from zero, as Tabula
-(JavaScript `Math.round(x * 1000) / 1000` for positive values)."""
+mean and SD and writes the method next to them. Results are rounded to 3 decimals as Tabula (JavaScript
+`Math.round(x * 1000) / 1000`), unless an analysis asks for the exact values."""
 from __future__ import annotations
 
 import math
 import re
+
+from ...cards import as_float, normalise, numbers
 
 # ---------------------------------------------------------------- method labels (English, stored with the result)
 
@@ -32,7 +34,7 @@ REFERENCES = {
 
 
 def round3(x: float) -> float:
-    """Round half away from zero to 3 decimals (Tabula: Math.round(x*1000)/1000)."""
+    """Round to 3 decimals as Tabula (JavaScript Math.round(x*1000)/1000): a half goes up, so -1.2345 -> -1.234."""
     return math.floor(x * 1000 + 0.5) / 1000
 
 
@@ -66,64 +68,59 @@ def norm_inv(p: float) -> float:
              / ((((_D[0] * q + _D[1]) * q + _D[2]) * q + _D[3]) * q + 1))
 
 
-_Z975 = 1.959963984540054
-
-
 def t_inv_975(df: float) -> float:
-    """0.975 quantile of Student's t with `df` degrees of freedom (Cornish-Fisher expansion in 1/df, four terms;
-    error below 1e-3 for df >= 3, which is all the 95% CI conversion needs: it is used only with n < 60)."""
+    """0.975 quantile of Student's t with `df` degrees of freedom, exact (ma_core.t_ppf). Tabula uses a Cornish-Fisher
+    expansion, which with df = 1 is 11% too low (SD 12% too high with n = 2): the user chose the exact value (audit of
+    2026-11-05); from df = 4 the two agree within 0.03%."""
     if df <= 0:
         raise ValueError("i gradi di libertà devono essere positivi")
-    z = _Z975
-    g1 = (z ** 3 + z) / 4
-    g2 = (5 * z ** 5 + 16 * z ** 3 + 3 * z) / 96
-    g3 = (3 * z ** 7 + 19 * z ** 5 + 17 * z ** 3 - 15 * z) / 384
-    g4 = (79 * z ** 9 + 776 * z ** 7 + 1482 * z ** 5 - 1920 * z ** 3 - 945 * z) / 92160
-    return z + g1 / df + g2 / df ** 2 + g3 / df ** 3 + g4 / df ** 4
+    from .ma_core import t_ppf
+    return t_ppf(0.975, df)
 
 
 # ---------------------------------------------------------------- numbers as written
 
-_NOT_NUMBER = re.compile(r"[^0-9eE+\-.]")
+_SCIENTIFIC = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)[eE][-+]?\d+")
 
 
 def num(v) -> float | None:
-    """A number from a cell as written: accepts a decimal comma ("3,5"), the unicode minus, and drops other
-    characters ("24 kPa" -> 24). Empty or unreadable -> None."""
+    """The one number of a cell as written, read like the validators read it (`cards.numbers`, `cards.as_float`):
+    decimal comma ("3,5"), thousands ("1,250" -> 1250), unicode minus, a unit next to it ("24.5 kg/m2" -> 24.5: a digit
+    attached to a letter belongs to the unit). No number, or more than one ("3.5 (1.2)") -> None: digits are never
+    glued together."""
     if v is None or isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
         return float(v) if math.isfinite(v) else None
-    s = str(v).strip().replace("−", "-").replace("–", "-")
-    if not s:
-        return None
-    if "," in s and "." not in s:
-        s = s.replace(",", ".")
-    s = _NOT_NUMBER.sub("", s)
-    try:
+    s = normalise(str(v))
+    if _SCIENTIFIC.fullmatch(s):
         x = float(s)
-    except ValueError:
-        return None
-    return x if math.isfinite(x) else None
+    else:
+        tokens = numbers(s)
+        x = as_float(tokens[0]) if len(tokens) == 1 else None
+    return x if x is not None and math.isfinite(x) else None
 
 
 # ---------------------------------------------------------------- mean and SD from a row
 
-def to_mean_sd(row: dict) -> dict | None:
+def to_mean_sd(row: dict, *, exact: bool = False) -> dict | None:
     """Mean and SD of one group from the statistics reported for it (Tabula `toMeanSD`, §4.4).
 
     Keys read: n, mean, sd, median, q1, q3, min, max, se, ci_l (or ci_low), ci_u (or ci_high).
     Order of attempts: reported mean+SD; mean from Luo 2018 (median+IQR, then median+range); SD from SE; SD (and,
     if missing, mean) from a 95% CI (t with n-1 df when n < 60, otherwise z = 3.92 total width); SD from Wan 2014
     (IQR, then range). Returns {mean, sd, method} rounded to 3 decimals (a missing part stays None), or None when
-    neither mean nor SD can be obtained. The estimators need n >= 2 (n < 2 -> no conversion); an inverted IQR or
-    range, a SE <= 0 or swapped CI bounds are not used (Tabula would return a negative SD)."""
+    neither mean nor SD can be obtained. With exact=True nothing is rounded: that is what an analysis uses, since 3
+    decimals would change a small SD (0.0014 -> 0.001, audit of 2026-11-05). The estimators need n >= 2 (n < 2 -> no
+    conversion); an inverted IQR or range, a SE <= 0 or swapped CI bounds are not used (Tabula would return a negative
+    SD)."""
+    rnd = (lambda x: x) if exact else round3
     g = lambda *keys: next((x for x in (num(row.get(k)) for k in keys) if x is not None), None)  # noqa: E731
     n, mean, sd = g("n"), g("mean"), g("sd")
     median, q1, q3, lo, hi = g("median"), g("q1"), g("q3"), g("min"), g("max")
     se, ci_l, ci_u = g("se"), g("ci_l", "ci_low"), g("ci_u", "ci_high")
     if mean is not None and sd is not None:
-        return {"mean": round3(mean), "sd": round3(sd), "method": REPORTED}
+        return {"mean": rnd(mean), "sd": rnd(sd), "method": REPORTED}
     ok_n = n is not None and n >= 2
     # sets that are written inconsistently are not used (never a negative SD): see row_problems for the messages
     if q1 is not None and q3 is not None and q1 > q3:
@@ -163,7 +160,7 @@ def to_mean_sd(row: dict) -> dict | None:
         methods.append(SD_WAN_RANGE)
     if mean is None and sd is None:
         return None
-    return {"mean": None if mean is None else round3(mean), "sd": None if sd is None else round3(sd),
+    return {"mean": None if mean is None else rnd(mean), "sd": None if sd is None else rnd(sd),
             "method": "; ".join(methods) if methods else REPORTED}
 
 

@@ -24,7 +24,6 @@ import hashlib
 import json
 import re
 import sqlite3
-import sys
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path

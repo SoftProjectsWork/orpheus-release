@@ -252,7 +252,7 @@ EXAMPLE_ANSWER = {"valori": [
 
 
 def system_message(packet: dict) -> str:
-    return (SYSTEM + "\nCampi della scheda:\n" + json.dumps(packet.get("campi") or {}, ensure_ascii=False)
+    return (SYSTEM + "\nCampi della scheda:\n" + json.dumps(packet.get("campi") or card_store.fields_spec(), ensure_ascii=False)
             + "\n\nEsempio di risposta:\n" + json.dumps(EXAMPLE_ANSWER, ensure_ascii=False))
 
 

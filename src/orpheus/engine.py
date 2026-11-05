@@ -38,7 +38,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -230,13 +230,11 @@ def metrics_to_write(env: Env) -> int:
 
 
 def segments_to_write(env: Env) -> int:
-    actions = segments.summary(segments.plan(env.conn))["azioni"]
-    return actions["nuovi"] + actions["da rifare"]
+    return segments.count_to_write(env.conn)
 
 
 def methods_to_write(env: Env) -> int:
-    actions = stats_terms.summary(stats_terms.plan(env.conn))["azioni"]
-    return actions["nuovi"] + actions["da rifare"]
+    return stats_terms.count_to_write(env.conn)
 
 
 def vectors_to_compute(env: Env) -> int:

@@ -7,9 +7,9 @@ This module has no database access: the text to check against is given as two di
 
 Text matching (`citazione_nel_testo`): a quote must be a continuous piece of the page or section it names. Both are
 compared after the same normalisation — Unicode NFKC (ligatures, "µ"), dashes and minus signs → "-", "◦"/"º" → "°",
-typographic quotes → plain ones, soft hyphens removed, case folded — and with ALL whitespace removed (PDF text breaks
-lines and table cells anywhere). A hyphen at the end of a line in the page is tried both ways (word split by
-hyphenation joined, or kept). Numbers (`numeri_nella_citazione`) are compared as written, with their sign: "-0.81"
+typographic quotes → plain ones, soft hyphens removed, case folded — and with whitespace removed (PDF text breaks lines
+anywhere), except between two digits: "12 3.4" is two numbers, never "123.4". A hyphen at the end of a line in the page
+is tried both ways (word split by hyphenation joined, or kept), but is never joined before a digit. Numbers (`numeri_nella_citazione`) are compared as written, with their sign: "-0.81"
 in the value needs "-0.81" (or "−0.81") in the quote; "0.81" does not match "−0.81".
 """
 
@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 CARD_VERSION = "cards-v1"
 CARD_FORMAT = "orpheus-scheda-v1"
-PACKET_FORMAT = "orpheus-pacchetto-v1"
+PACKET_FORMAT = "orpheus-pacchetto-v2"
 
 # field -> (description for the instructions, required with a value, numeric kind)
 FIELDS: dict[str, dict] = {
@@ -121,7 +121,9 @@ _TRANSLATE = str.maketrans({
     "·": ".", "⋅": ".", "‧": ".",
 })
 _WS = re.compile(r"\s+")
-_LINE_HYPHEN = re.compile(r"-[ \t]*\r?\n\s*")
+_LINE_HYPHEN = re.compile(r"-[ \t]*\r?\n\s*(?![\s\d])")     # not before a digit: "1-\n5" is not 15
+_DIGIT_GAP = re.compile(r"(?<=\d)\s+(?=\d)")
+_GAP = "\u2423"                                               # stays between two numbers: "12 3.4" is not "123.4"
 
 
 def normalise(text: str) -> str:
@@ -131,9 +133,10 @@ def normalise(text: str) -> str:
 
 
 def squash(text: str) -> str:
-    """normalise + case folded + no whitespace at all: the form quotes and pages are compared in."""
+    """normalise + case folded + no whitespace, except a mark between two digits (two cells of a table never become
+    one number): the form quotes and pages are compared in."""
     t = unicodedata.normalize("NFKC", text or "").translate(_TRANSLATE).casefold()
-    return _WS.sub("", t)
+    return _WS.sub("", _DIGIT_GAP.sub(_GAP, t))
 
 
 def text_forms(text: str) -> tuple[str, ...]:
@@ -154,34 +157,49 @@ _WORD_NUMBERS = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
     "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
     "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
-    "eighty": 80, "ninety": 90, "hundred": 100,
+    "eighty": 80, "ninety": 90,
 }
 _WORD_RE = re.compile(r"[a-z]+")
 
 
+_POWER = re.compile(r"(?<=\d)[⁰¹²³⁴-⁹]+")
+
+
 def numbers(text: str) -> list[str]:
-    """Number tokens as written (after normalise), with a leading '-' when it is a sign (not a range '18-25')."""
-    return _NUMBER.findall(normalise(text))
+    """Number tokens as written (after normalise), with a leading '-' when it is a sign (not a range '18-25').
+    A power stays apart from its base: '10⁵' is 10 and 5, never 105."""
+    return _NUMBER.findall(normalise(_POWER.sub(lambda m: "^" + m.group(0), text or "")))
 
 
 def _plain(token: str) -> str:
-    return token.replace(",", "")
+    """Without the commas only when they separate thousands: '1,000' = '1000', but '1,5' is not '15'."""
+    return token.replace(",", "") if _THOUSANDS.fullmatch(token) else token
 
 
 _COMPOUND = re.compile(r"\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-]+(one|two|three|four|five|six|seven|"
                        r"eight|nine)\b")
 
 
+_HUNDRED = re.compile(r"\b(a|one|two|three|four|five|six|seven|eight|nine)[\s-]+hundred(?:[\s-]+(?:and[\s-]+)?"
+                      r"([a-z]+)(?:[\s-]+(one|two|three|four|five|six|seven|eight|nine))?)?\b")
+
+
 def number_words(text: str) -> set[str]:
-    """Numbers written in English words in the text: 'fifteen' -> '15', 'Twenty-seven' -> '27'."""
+    """Numbers written in English words in the text: 'fifteen' -> '15', 'Twenty-seven' -> '27', 'one hundred and
+    fifteen' -> '115' (and '100')."""
     t = normalise(text).casefold()
     out = {str(_WORD_NUMBERS[w]) for w in _WORD_RE.findall(t) if w in _WORD_NUMBERS}
     out |= {str(_WORD_NUMBERS[a] + _WORD_NUMBERS[b]) for a, b in _COMPOUND.findall(t)}
+    for head, rest, unit in _HUNDRED.findall(t):
+        base = 100 * (1 if head == "a" else _WORD_NUMBERS[head])
+        out.add(str(base))
+        if rest in _WORD_NUMBERS and _WORD_NUMBERS[rest] < 100:
+            out.add(str(base + _WORD_NUMBERS[rest] + (_WORD_NUMBERS[unit] if unit else 0)))
     return out
 
 
 def missing_numbers(value: str, quote: str) -> list[str]:
-    """Numbers of the value that are not in the quote (same token, or same digits without thousands commas;
+    """Numbers of the value that are not in the quote (same token, or same number without the commas of thousands;
     small integers may be written as words in the quote: 'fifteen')."""
     have = numbers(quote)
     plain = {_plain(t) for t in have}
@@ -222,8 +240,8 @@ _UNIT_INDEX = {squash(a): canon for canon, aliases in UNIT_ALIASES.items() for a
 
 
 def unit_in_quote(unit: str, quote: str) -> bool:
-    """The unit (or one of its accepted spellings) is written in the quote. Short units must stand alone
-    ('m' does not count inside 'mass')."""
+    """The unit (or one of its accepted spellings) is written in the quote. Units must stand alone: 'm' does not count
+    inside 'mass', nor inside a compound unit ('m/s', 'm2', 'kg.m-2', 'm s-1')."""
     q = normalise(quote).casefold()
     canon = _UNIT_INDEX.get(squash(unit))
     spellings = {unit} | (set(UNIT_ALIASES[canon]) | {canon} if canon else set())
@@ -232,7 +250,7 @@ def unit_in_quote(unit: str, quote: str) -> bool:
         if not s:
             continue
         if s[0].isalnum() and s[-1].isalnum():
-            if re.search(rf"(?<![a-z]){re.escape(s)}(?![a-z])", q):
+            if re.search(rf"(?<![a-z/.]){re.escape(s)}(?![a-z0-9/]|\.[a-z0-9]|-\d)", q):
                 return True
             # compound units ("nm.kg-1", "m/s"): PDF text may put spaces inside them ("Nm·kg −1")
             if not squash(s).isalnum() and squash(s) in squash(q):
@@ -388,13 +406,13 @@ def check_units(card: Card) -> CheckResult:
 _THOUSANDS = re.compile(r"-?\d{1,3}(?:,\d{3})+")
 
 
-def _as_float(token: str) -> float | None:
-    """'1,257' (thousands) -> 1257; '0,81' (decimal comma) -> 0.81; '.01' -> 0.01."""
+def as_float(token: str) -> float | None:
+    """'1,257' (thousands) -> 1257; '0,81' (decimal comma) -> 0.81; '.01' -> 0.01; '1,234.5' and '1.234,5' -> 1234.5."""
     t = token
     if _THOUSANDS.fullmatch(t):
         t = t.replace(",", "")
-    elif "," in t and "." not in t:
-        t = t.replace(",", ".")
+    elif "," in t and ("." not in t or t.rfind(",") > t.rfind(".")):
+        t = t.replace(".", "").replace(",", ".")
     else:
         t = t.replace(",", "")
     try:
@@ -408,7 +426,7 @@ def check_plausible(card: Card) -> CheckResult:
     for i, v in enumerate(card.valori, 1):
         if v.origin == "not_available" or not v.valore:
             continue
-        nums = [x for x in (_as_float(t) for t in numbers(v.valore)) if x is not None]
+        nums = [x for x in (as_float(t) for t in numbers(v.valore)) if x is not None]
         kind = FIELDS[v.campo]["tipo"]
         if kind == "intero" and nums:
             n = nums[0]

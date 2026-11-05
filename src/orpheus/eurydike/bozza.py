@@ -19,7 +19,6 @@ R10: everything stays on the PC; nothing is written in the database.
 """
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from pathlib import Path

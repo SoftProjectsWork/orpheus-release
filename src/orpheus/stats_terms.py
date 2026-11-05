@@ -616,6 +616,22 @@ def plan(conn: sqlite3.Connection) -> dict:
     return {"regole": RULES_VERSION, "articoli": out}
 
 
+def count_to_write(conn: sqlite3.Connection) -> int:
+    """How many complete articles `plan` would (re)write, without reading again what is done: every analysed article
+    has its row in text_structure, so a document is done when that row exists and nothing is of other rules (a
+    difference in the text itself is still found by `orpheus metodi`, which compares everything). Read-only."""
+    n = 0
+    for _article_id, d in card_store._complete_documents(conn).items():
+        current, other = conn.execute(
+            """SELECT (SELECT count(*) FROM text_structure WHERE document_id = ?1 AND rules = ?2),
+                      (SELECT count(*) FROM text_method_item WHERE document_id = ?1 AND rules <> ?2)
+                    + (SELECT count(*) FROM text_structure WHERE document_id = ?1 AND rules <> ?2)""",
+            (d["id"], RULES_VERSION)).fetchone()
+        if other or not current:
+            n += 1
+    return n
+
+
 def write(conn: sqlite3.Connection, the_plan: dict, *, actor: str = "orpheus metodi") -> dict:
     written = replaced = 0
     changed = [it for it in the_plan["articoli"] if it["azione"] != "uguali"]

@@ -29,7 +29,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import audit, card_store
-from .cards import normalise
+from .cards import normalise, squash
 from .db import transaction
 from .ids import new_id
 from .ingest_pdf import rejoin_hyphenated
@@ -240,8 +240,48 @@ def plan(conn: sqlite3.Connection) -> dict:
     return {"regole": RULES_VERSION, "articoli": items}
 
 
+def count_to_write(conn: sqlite3.Connection) -> int:
+    """How many complete articles `plan` would (re)write, without reading again what is done: the pages of a document
+    do not change, so its segments are good when they exist and are all of the current rules (a difference in the
+    text itself is still found by `orpheus segmenta`, which compares everything). Read-only."""
+    n = 0
+    for _article_id, d in card_store._complete_documents(conn).items():
+        current, other = conn.execute(
+            "SELECT coalesce(sum(rules = ?), 0), coalesce(sum(rules <> ?), 0) FROM segment WHERE document_id = ?",
+            (RULES_VERSION, RULES_VERSION, d["id"])).fetchone()
+        if other or (not current and segment_pages(_pages(conn, d["id"]))):
+            n += 1
+    return n
+
+
+def segment_for(conn: sqlite3.Connection, document_id: str, page: int, quote: str) -> str | None:
+    """The segment of this page that contains the quote; failing that the page's first segment; None if it has none."""
+    rows = conn.execute("""SELECT id, text FROM segment WHERE document_id = ? AND rules = ? AND page_from <= ?
+                           AND page_to >= ? ORDER BY ord""", (document_id, RULES_VERSION, page, page)).fetchall()
+    q = squash(quote)[:60]
+    for r in rows:
+        if q and q in squash(r["text"]):
+            return r["id"]
+    return rows[0]["id"] if rows else None
+
+
+def _relink_evidence(conn: sqlite3.Connection, document_id: str) -> tuple[int, int]:
+    """Deleting segments empties evidence_record.segment_id (ON DELETE SET NULL). Segments are derived, the evidence is
+    not (ADR-0018): point it at the new segments. Returns (linked, left without a segment)."""
+    linked = without = 0
+    for e in conn.execute("""SELECT id, page_no, quote FROM evidence_record WHERE document_id = ?
+                             AND page_no IS NOT NULL AND quote IS NOT NULL""", (document_id,)).fetchall():
+        segment_id = segment_for(conn, document_id, e["page_no"], e["quote"])
+        if segment_id is None:
+            without += 1
+            continue
+        conn.execute("UPDATE evidence_record SET segment_id = ? WHERE id = ?", (segment_id, e["id"]))
+        linked += 1
+    return linked, without
+
+
 def write(conn: sqlite3.Connection, the_plan: dict, *, actor: str = "orpheus segmenta") -> dict:
-    written = replaced = 0
+    written = replaced = relinked = unlinked = 0
     with transaction(conn):
         for it in the_plan["articoli"]:
             if it["azione"] == "uguali":
@@ -254,12 +294,18 @@ def write(conn: sqlite3.Connection, the_plan: dict, *, actor: str = "orpheus seg
                              (new_id("segment"), it["document_id"], it["article_id"], RULES_VERSION, s.ord, s.page_from,
                               s.page_to, s.section, s.text, s.words, s.sha256))
                 written += 1
+            if it["azione"] == "da rifare":
+                linked, without = _relink_evidence(conn, it["document_id"])
+                relinked += linked
+                unlinked += without
         changed = sum(1 for it in the_plan["articoli"] if it["azione"] != "uguali")
         if changed:
             audit.record(conn, actor=actor, action="write_segments",
                          payload={"regole": RULES_VERSION, "articoli": changed, "segmenti_scritti": written,
-                                  "segmenti_sostituiti": replaced}, in_transaction=True)
-    return {"articoli_cambiati": changed, "segmenti_scritti": written, "segmenti_sostituiti": replaced}
+                                  "segmenti_sostituiti": replaced, "evidenze_ricollegate": relinked,
+                                  "evidenze_senza_segmento": unlinked}, in_transaction=True)
+    return {"articoli_cambiati": changed, "segmenti_scritti": written, "segmenti_sostituiti": replaced,
+            "evidenze_ricollegate": relinked, "evidenze_senza_segmento": unlinked}
 
 
 def summary(the_plan: dict) -> dict:

@@ -42,7 +42,7 @@ from .quality import REPORTS_DIR
 
 CONTRACT = "obiettivi-v2"          # 2026-11-01: taxonomy v2 approved by the user on 2026-10-31 23:07 (ADR-0015)
 CONTRACTS = ("obiettivi-v1", "obiettivi-v2")   # packets of both are accepted; the cards are always checked with v2
-PACKET_FORMAT = "orpheus-pacchetto-obiettivi-v2"
+PACKET_FORMAT = "orpheus-pacchetto-obiettivi-v3"
 PACKETS_DIR = "pacchetti_obiettivi"
 CARDS_DIR = "schede_obiettivi"
 TASK_KEY = "T-057c:obiettivi-v1:{article_id}"      # stable identity of the task of an article (not the contract)
@@ -338,16 +338,16 @@ COMPLETE_INSTRUCTION = ("COMPLETION of a card written with obiettivi-v1: write O
 def packet(meta: dict, task_id: str, run: dict, pages: dict[int, str], items: list[dict], *,
            current: dict | None = None) -> dict:
     params = run["parameters"]
-    fields = tuple(params["campi"]) if params.get("completamento") else FIELDS
+    kept, trimmed = card_store.trim_packet_pages(pages)
     out = {"formato": PACKET_FORMAT, "contratto": CONTRACT, "versione_scheda": cards_v2.VERSION,
            "task_id": task_id, "workflow_run_id": run["id"], "article_id": meta["article_id"],
            "emesso_il": run["started_at"], "hash_testo": params["text_sha256"],
            "documento": params["document_id"], "articolo": meta,
-           "istruzioni": ([COMPLETE_INSTRUCTION] if params.get("completamento") else []) + INSTRUCTIONS,
-           "campi": fields_spec(fields), "esempio": EXAMPLE, "voci_livello_1": items,
-           "testo": {"pagine": [{"pagina": k, "testo": pages[k]} for k in sorted(pages)]}}
-    if params.get("completamento"):
-        out |= {"completamento": True, "valori_attuali": current or {}}
+           "comune": card_store.COMMON_FILE, "testo_tagliato": trimmed, "voci_livello_1": items,
+           "testo": {"pagine": [{"pagina": k, "testo": kept[k]} for k in sorted(kept)]}}
+    if params.get("completamento"):                 # its own instruction and fields, on top of the common file
+        out |= {"istruzioni": [COMPLETE_INSTRUCTION], "campi": fields_spec(tuple(params["campi"])),
+                "completamento": True, "valori_attuali": current or {}}
     return out
 
 
@@ -432,6 +432,10 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
                 "contract": CONTRACT, "articles": [w[0] for w in written], "new_runs": res.created_runs,
                 "completion": complete},
                 in_transaction=True)
+    if written:
+        res.common_file = card_store.write_common(packets_dir(home), {
+            "formato": PACKET_FORMAT, "contratto": CONTRACT, "versione_scheda": cards_v2.VERSION,
+            "nota": card_store.TRIM_NOTE, "istruzioni": INSTRUCTIONS, "campi": fields_spec(), "esempio": EXAMPLE})
     for aid, task_id, run, doc, pages in written:
         meta = card_store._metadata(conn, aid, doc)
         data = json.dumps(packet(meta, task_id, run, pages, level1_items(conn, aid),

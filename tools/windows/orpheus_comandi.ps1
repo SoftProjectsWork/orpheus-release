@@ -679,6 +679,7 @@ function Invoke-Pacchetti {
     Write-Log "  Cartella dei pacchetti: $($j.cartella_pacchetti)"
     Write-Log "  Claude scrivera' le schede in: $($j.cartella_schede_da_inviare)"
     Write-Log ("  Stato: schede accettate {0}, pacchetti aperti {1}" -f $j.stato.schede_accettate, $j.stato.pacchetti_aperti)
+    foreach ($c in @($j.pacchetti_chiusi)) { if ($c) { Write-Log "  Pacchetto chiuso, senza scheda ($($c.doi)): $($c.motivo)" } }
     if ($j.verifica_copia) { Write-Log "  ATTENZIONE: $($j.verifica_copia.messaggio)" }
     # Decisione dell'utente del 2026-10-12: i pacchetti con testo aperto (licenza Creative Commons) vanno su GitHub,
     # ramo pacchetti-cc, cosi' il loop orario scrive quelle schede anche a PC spento. Gli altri restano su questo PC.

@@ -23,6 +23,7 @@ from .. import audit, cards
 from ..cards import CheckResult, Outcome
 from ..ids import new_id
 from . import store
+from .core.stats import num
 
 FORMAT, VERSION = "orpheus-scheda-v2", "cards-v2"
 V1_FIELDS = cards.FIELD_NAMES
@@ -233,7 +234,8 @@ def check_packet_fields(card: Card, wanted: tuple[str, ...], decided: set[tuple[
 
 
 def _f(x: str | None) -> float | None:
-    return None if x is None else cards._as_float(cards.numbers(x)[0]) if cards.numbers(x) else None
+    """The same reading as the analysis (core.stats.num): what passes here is what enters the meta-analysis."""
+    return num(x)
 
 
 def check_rows(card: Card, pages: dict[int, str]) -> list[CheckResult]:
@@ -248,8 +250,8 @@ def check_rows(card: Card, pages: dict[int, str]) -> list[CheckResult]:
         for k in STATS:
             v = getattr(r, k)
             if v is not None:
-                if not cards.numbers(v):
-                    written.append(f"{lab}: {k} '{v}' non è un numero")
+                if num(v) is None:
+                    written.append(f"{lab}: {k} '{v}' non è un numero (un solo numero per casella)")
                 elif cards.missing_numbers(v, r.quote):
                     written.append(f"{lab}: {k} '{v}' non è scritto nella frase (niente valori calcolati)")
         s = {k: _f(getattr(r, k)) for k in STATS}

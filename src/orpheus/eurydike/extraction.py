@@ -26,7 +26,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .. import audit, card_store, cards
-from ..cards import CheckResult
 from ..db import transaction
 from ..ids import new_id
 from . import cards_v2, store

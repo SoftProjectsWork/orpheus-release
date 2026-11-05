@@ -47,6 +47,23 @@ def make_backup(conn: sqlite3.Connection, state: LocalState, *, reason: str) -> 
     return entry
 
 
+def backup_before_write(conn: sqlite3.Connection, state: LocalState, settings: LocalSettings) -> dict | None:
+    """Before a write from the dashboard: a restore point, unless the newest backup is this very state or is younger
+    than auto_backup_minutes (0 = off, as for the automatic backups)."""
+    if settings.auto_backup_minutes == 0:
+        return None
+    h = lineage.head(conn)
+    if h.database_id is None:
+        return None
+    newest = state.newest_backup(h.database_id)
+    if newest and (newest["head_hash"] == h.hash or datetime.now(timezone.utc) - parse_utc(newest["created_at"])
+                   < timedelta(minutes=settings.auto_backup_minutes)):
+        return None
+    entry = make_backup(conn, state, reason="before_write")
+    state.prune(h.database_id, settings.keep_local_backups)
+    return entry
+
+
 def maybe_auto_backup(conn: sqlite3.Connection, state: LocalState, settings: LocalSettings, *,
                       head_before: lineage.Head) -> dict | None:
     """After a command that changed the database: back up if the last backup is old enough."""

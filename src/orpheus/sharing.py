@@ -15,7 +15,8 @@ esporta → one .zip file (format orpheus-condivisione/1): manifest.json + condi
               text_method_item and text_structure (the user's hand check text_method_check stays here);
             * the rows those depend on (documents, snapshots, runs, tasks, agents, models, project, sources).
           Never: PDF files, page texts, manuscripts and drafts (R10), EURYDIKE reviews, the audit log, backups, .env.
-          Snapshot storage paths are blanked (the files are not in the package). Export only READS the database.
+          Snapshot storage paths are blanked (the files are not in the package) and absolute paths of this PC are taken
+          away (they show the user's name and folders). Export only READS the database.
 unisci  → merges a package into this PC's database. "Keep yours" (decision of 2026-10-23): what this PC already has is
           never changed or replaced; only what is missing is added.
             * same row (same id) or same natural key (DOI/PMID of an article, ISSN of a journal, SHA-256 of a PDF, …)
@@ -31,12 +32,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import tempfile
 import zipfile
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__, audit, db
@@ -89,6 +91,20 @@ DEPENDENCIES = {"author", "document", "source_snapshot", "source", "journal_poli
                 "article_version", "citation"}
 ALLOWED = {t for t, *_ in ROOTS} | DEPENDENCIES
 DOCUMENT_KINDS = ("article", "author_guidelines")     # never 'other' (where a manuscript could be)
+
+
+_LOCAL_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]|file:)", re.I)
+
+
+def without_local_path(table: str, row: dict) -> dict:
+    """A row without the absolute paths of a PC (they show the user's name and folders): a PDF read outside ORPHEUS_HOME
+    is stored with its full path. Relative paths stay: they are the same on every PC. Used when exporting and, for
+    packages made by older versions, when merging."""
+    if table == "document" and _LOCAL_PATH.match(row.get("original_path") or ""):
+        return {**row, "original_path": f"condiviso/{row['file_sha256']}.pdf"}
+    if table == "source_snapshot" and _LOCAL_PATH.match(row.get("request_uri") or ""):
+        return {**row, "request_uri": f"home:condiviso/{row['content_sha256']}"}
+    return row
 
 
 class SharingError(Exception):
@@ -228,9 +244,10 @@ def export_package(conn: sqlite3.Connection, *, dest_dir: Path, note: str | None
                 for t, by_key in rows.items():
                     names = [n for n in sch.names(t) if n in set(share_schema.names(t))]
                     for r in by_key.values():
-                        vals = [r[n] for n in names]
+                        row = without_local_path(t, {n: r[n] for n in names})
                         if t == "source_snapshot":
-                            vals[names.index("storage_path")] = None     # the files are not in the package
+                            row["storage_path"] = None                   # the files are not in the package
+                        vals = [row[n] for n in names]
                         share.execute(f"INSERT OR IGNORE INTO {t} ({_q(names)}) VALUES ({', '.join('?' * len(names))})",
                                       vals)
             share.execute("PRAGMA foreign_keys = ON")
@@ -353,7 +370,7 @@ class Merger:
             return found
         self.busy.add(mk)
         try:
-            vals = {n: r[n] for n in self.ss.names(t) if n in set(self.ls.names(t))}
+            vals = without_local_path(t, {n: r[n] for n in self.ss.names(t) if n in set(self.ls.names(t))})
             for fk in self.ls.fks(t):
                 pv = tuple(r[c] for c in fk["from"])
                 if all(v is None for v in pv):

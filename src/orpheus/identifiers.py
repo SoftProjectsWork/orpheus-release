@@ -8,6 +8,7 @@ A value that fails validation is rejected, never "repaired" by guessing.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 _DOI_PREFIXES = (
     "https://doi.org/",
@@ -42,7 +43,8 @@ def normalize_doi(raw: str) -> str:
             value = value[len(prefix):]
             break
     value = value.strip().lower()
-    if not _DOI_RE.match(value):
+    if (not _DOI_RE.match(value) or value[-1] in ".,;" or value.count("(") < value.count(")")
+            or any(unicodedata.category(c) == "Cf" for c in value)):
         raise IdentifierError(f"not a valid DOI: {raw!r}")
     return value
 

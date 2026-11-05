@@ -38,6 +38,7 @@ from .config import ROOT
 from .europepmc_survey import is_cc
 from .content import COMPLETE, classify_all
 from .db import transaction
+from .eurydike.core.text import trim_references
 from .ids import new_id
 from .quality import REPORTS_DIR
 from .verify_doi import latest_checks
@@ -56,6 +57,8 @@ TASK_KEY = "T-019:{version}:{article_id}"
 EXCLUDED_TYPES = {"Review", "Systematic Review", "Meta-Analysis", "Consensus Statement", "Practice Guideline", "Guideline",
                   "Editorial", "Comment", "Letter", "Published Erratum", "Retraction of Publication", "Scoping Review"}
 EXCLUSIONS_FILE = ROOT / "config" / "schede_esclusi.yaml"
+EXCLUSION_KINDS = ("non_studio", "senza_partecipanti", "caso_singolo")
+CLOSED_DIR = "chiusi"
 _EXCLUDED_TITLE = re.compile(r"\b(review|meta-analys[ie]s|consensus|position stand|position statement|editorial|"
                              r"corrigendum|erratum|letter to the editor)\b", re.I)
 
@@ -256,21 +259,128 @@ def current_card(conn: sqlite3.Connection, article_id: str, version: str = cards
                         (article_id, version)).fetchone()
 
 
+# What can follow a reference list and must stay in the packet (ADR-0019): journals and accepted manuscripts often put
+# tables, figures and declarations after it. A line of a reference that happens to start like this only keeps more text.
+_AFTER_REFERENCES = re.compile(
+    r"^[ \t]*(?:\d+\.?[ \t]+)?(?:tables?\b|tab\.|figures?\b|fig\.|appendix\b|appendices\b|supplement\w*|funding\b|financial\b"
+    r"|acknowledg\w*|conflicts?[ \t]+of[ \t]+interest|competing[ \t]+interests?|declaration\w*|disclosure\w*"
+    r"|authors?'?[ \t]+contribution\w*|contributors\b|data[ \t]+availability|ethic\w*|abstract\b|introduction\b|methods\b"
+    r"|materials\b|results\b|discussion\b|conclusions?\b|tabella\b|figura\b|appendice\b|finanziament\w*|ringraziament\w*"
+    r"|errat\w*|corrigend\w*|corrections?\b|publisher'?s?[ \t]+(?:note|correction)|retraction\b|supporting[ \t]+information)",
+    re.I | re.M)
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+CHARS_PER_YEAR_IN_REFERENCES = 400     # a reference list has a year at least this often; otherwise nothing is cut
+
+
+def trim_packet_pages(pages: dict[int, str]) -> tuple[dict[int, str], dict | None]:
+    """The pages for a work packet, without the reference list (ADR-0019). Page numbers do not change. What follows the
+    list stays: from a known heading (tables, declarations, errata...), and in any case from the line after the last year.
+    If what would be cut does not look like a reference list, nothing is cut. Only the packet is lighter: the fingerprint
+    and the checks of `orpheus submit` still use the whole text."""
+    numbers = sorted(pages)
+    kept_list, cut = trim_references([pages[n] for n in numbers])
+    if cut is None:
+        return dict(pages), None
+    at = cut - 1
+    head = kept_list[at]
+    page = pages[numbers[at]]
+    first_text = len(page) - len(page[len(head):].lstrip())
+    heading_end = page.find("\n", first_text)
+    begin = len(page) if heading_end < 0 else heading_end
+    spans = []                                    # (page index, start, end) of the text that would go
+    resume = None
+    for i in range(at, len(numbers)):
+        text = pages[numbers[i]]
+        start = begin if i == at else 0
+        m = _AFTER_REFERENCES.search(text, start)
+        spans.append((i, start, m.start() if m else len(text)))
+        if m:
+            resume = (i, m.start())
+            break
+    for pos in range(len(spans) - 1, -1, -1):     # after the last year it is not a reference: it stays
+        i, start, end = spans[pos]
+        text = pages[numbers[i]]
+        years = list(_YEAR.finditer(text, start, end))
+        if not years:
+            continue
+        newline = text.find("\n", years[-1].end(), end)
+        stop = end if newline < 0 else newline + 1
+        spans = spans[:pos] + [(i, start, stop)]
+        if text[stop:end].strip() or resume == (i, end):
+            resume = (i, stop)
+        elif i + 1 < len(numbers):
+            resume = (i + 1, 0)
+        break
+    gone = page[len(head):begin] + "".join(pages[numbers[i]][start:end] for i, start, end in spans)
+    if len(_YEAR.findall(gone)) * CHARS_PER_YEAR_IN_REFERENCES < len(gone):
+        return dict(pages), None
+    kept = {n: pages[n] for n in numbers[:at]}
+    kept[numbers[at]] = head
+    last = spans[-1][0]
+    if resume is not None:
+        i, offset = resume
+        rest = pages[numbers[i]][offset:]
+        kept[numbers[i]] = f"{head}\n{rest}" if i == at and head else rest
+        kept |= {n: pages[n] for n in numbers[i + 1:]}
+    return kept, {"dalla_pagina": numbers[at], "alla_pagina": numbers[last], "caratteri_tolti": len(gone),
+                  "ripreso_da_pagina": numbers[resume[0]] if resume else None}
+
+
+def fields_spec() -> dict:
+    return {k: {"obbligatorio": v["obbligatorio"], "descrizione": v["descrizione"]} for k, v in cards.FIELDS.items()}
+
+
+COMMON_FILE = "_comune.json"            # never art_*.json: whoever lists the packets does not take it for an article
+TRIM_NOTE = ("In ogni pacchetto, «comune» è questo file: si legge una volta sola. «testo_tagliato», se non è null, dice dove è stata "
+             "tolta la bibliografia dal pacchetto: il testo che resta e i numeri di pagina sono quelli del PDF. «hash_testo» è "
+             "l'impronta del testo completo.")
+
+
 def _packet(meta: dict, task_id: str, run: dict, pages: dict[int, str], sections: dict[int, dict]) -> dict:
+    kept, trimmed = trim_packet_pages(pages)
     return {
         "formato": cards.PACKET_FORMAT, "versione_scheda": cards.CARD_VERSION,
         "task_id": task_id, "workflow_run_id": run["id"], "article_id": meta["article_id"],
         "emesso_il": run["started_at"], "hash_testo": run["parameters"]["text_sha256"],
         "documento": run["parameters"]["document_id"], "testo_aperto_jats": run["parameters"]["jats_snapshot_id"],
         "articolo": meta,
-        "istruzioni": INSTRUCTIONS,
-        "campi": {k: {"obbligatorio": v["obbligatorio"], "descrizione": v["descrizione"]} for k, v in cards.FIELDS.items()},
-        "esempio": EXAMPLE,
-        "schema_json": cards.json_schema(),
-        "testo": {"pagine": [{"pagina": k, "testo": pages[k]} for k in sorted(pages)],
+        "comune": COMMON_FILE, "testo_tagliato": trimmed,
+        "testo": {"pagine": [{"pagina": k, "testo": kept[k]} for k in sorted(kept)],
                   "sezioni": [{"sezione": k, "livello": s["livello"], "titolo": s["titolo"], "testo": s["testo"]}
                               for k, s in sorted(sections.items())]},
     }
+
+
+def close_excluded_packets(conn: sqlite3.Connection, home: Path, *, excluded_dois: dict[str, str] | None = None,
+                           actor: str = "orpheus pacchetti") -> list[dict]:
+    """Open packets of the articles excluded by hand: the run and the task become 'cancelled' with the reason and the file
+    moves to rapporti/pacchetti/chiusi, so that nobody takes it as work to do. Nothing is deleted, and taking the line out
+    of config/schede_esclusi.yaml brings the article back into the draw. Without open excluded packets it writes nothing."""
+    by_hand = {k.strip().lower(): v for k, v in (exclusions() if excluded_dois is None else excluded_dois).items()}
+    closing = []
+    for aid in open_packet_articles(conn):
+        row = conn.execute("SELECT doi FROM article WHERE id = ?", (aid,)).fetchone()
+        doi = (row[0] or "").strip().lower() if row else ""
+        if doi and doi in by_hand:
+            closing.append({"article_id": aid, "doi": doi, "motivo": by_hand[doi]})
+    if not closing:
+        return []
+    with transaction(conn):
+        for c in closing:
+            key = TASK_KEY.format(version=cards.CARD_VERSION, article_id=c["article_id"])
+            task_id = conn.execute("SELECT id FROM task WHERE idempotency_key = ?", (key,)).fetchone()[0]
+            conn.execute("""UPDATE workflow_run SET status = 'cancelled', finished_at = ?, error = ?
+                            WHERE task_id = ? AND status = 'running'""",
+                         (audit.utc_now(), f"escluso a mano: {c['motivo']}"[:2000], task_id))
+            conn.execute("UPDATE task SET status = 'cancelled' WHERE id = ? AND status <> 'done'", (task_id,))
+        audit.record(conn, actor=actor, action="card_packets_closed",
+                     payload={"card_version": cards.CARD_VERSION, "articoli": closing}, in_transaction=True)
+    for c in closing:
+        path = packets_dir(home) / f"{c['article_id']}.json"
+        if path.exists():
+            (packets_dir(home) / CLOSED_DIR).mkdir(parents=True, exist_ok=True)
+            path.replace(packets_dir(home) / CLOSED_DIR / path.name)
+    return closing
 
 
 def _write_if_changed(path: Path, data: bytes) -> bool:
@@ -283,12 +393,20 @@ def _write_if_changed(path: Path, data: bytes) -> bool:
     return True
 
 
+def write_common(folder: Path, common: dict) -> str:
+    """The parts that every packet of this folder shares, in one file (ADR-0019)."""
+    path = folder / COMMON_FILE
+    _write_if_changed(path, json.dumps(common, ensure_ascii=False, indent=1).encode("utf-8"))
+    return str(path)
+
+
 @dataclass
 class PacketResult:
     issued: list[dict] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)
     problems: list[dict] = field(default_factory=list)
     created_runs: int = 0
+    common_file: str | None = None
 
 
 def has_open_packet(conn: sqlite3.Connection, article_id: str) -> bool:
@@ -441,6 +559,10 @@ def issue_packets(conn: sqlite3.Connection, home: Path, article_ids: list[str], 
             audit.record(conn, actor=actor, action="card_packets_issued", payload={
                 "card_version": cards.CARD_VERSION, "articles": [w[0] for w in written], "new_runs": res.created_runs},
                 in_transaction=True)
+    if written:
+        res.common_file = write_common(packets_dir(home), {
+            "formato": cards.PACKET_FORMAT, "versione_scheda": cards.CARD_VERSION, "nota": TRIM_NOTE,
+            "istruzioni": INSTRUCTIONS, "campi": fields_spec(), "esempio": EXAMPLE, "schema_json": cards.json_schema()})
     for aid, task_id, run, doc_id, pages, sections in written:
         meta = _metadata(conn, aid, doc_id)
         data = json.dumps(_packet(meta, task_id, run, pages, sections), ensure_ascii=False, indent=1).encode("utf-8")

@@ -203,13 +203,20 @@ def portable(path: Path, home: Path | None) -> str:
     return str(resolved)
 
 
-def _read_pages(path: Path) -> tuple[list[str], dict]:
-    reader = pypdf.PdfReader(str(path))
+def _open_unprotected(reader: pypdf.PdfReader) -> None:
+    """A PDF with a password: reported, never bypassed (decrypt does not raise: it says that it did not work)."""
     if reader.is_encrypted:
         try:
-            reader.decrypt("")
-        except Exception as exc:  # password-protected: report, never bypass
+            result = reader.decrypt("")
+        except Exception as exc:
             raise ValueError("encrypted PDF: provide an unprotected copy") from exc
+        if result == pypdf.PasswordType.NOT_DECRYPTED:
+            raise ValueError("encrypted PDF: provide an unprotected copy")
+
+
+def _read_pages(path: Path) -> tuple[list[str], dict]:
+    reader = pypdf.PdfReader(str(path))
+    _open_unprotected(reader)
     return rejoin_hyphenated([_clean(p.extract_text() or "") for p in reader.pages])
 
 
@@ -272,11 +279,7 @@ def ingest_pdf(conn: sqlite3.Connection, path: Path, *, kind: str = "article",
             return result
 
         reader = pypdf.PdfReader(str(path))
-        if reader.is_encrypted:
-            try:
-                reader.decrypt("")
-            except Exception as exc:  # password-protected: report, never bypass
-                raise ValueError("encrypted PDF: provide an unprotected copy") from exc
+        _open_unprotected(reader)
         pages, hyphen_stats = rejoin_hyphenated([_clean(p.extract_text() or "") for p in reader.pages])
         meta = _metadata(reader)
 

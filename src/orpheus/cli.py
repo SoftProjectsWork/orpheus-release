@@ -1835,7 +1835,8 @@ def cmd_search(args) -> int:
 
 def cmd_packets(args) -> int:
     ctx = _open(write=True)
-    out: dict = {}
+    closed = card_store.close_excluded_packets(ctx.conn, ctx.home)     # who is on config/schede_esclusi.yaml has no open packet
+    out: dict = {"pacchetti_chiusi": closed}
     if args.articoli:
         ids = list(dict.fromkeys(args.articoli))
     elif args.modo:
@@ -1868,13 +1869,14 @@ def cmd_packets(args) -> int:
                                    project_version=ctx.project.version)
     card_store.to_send_dir(ctx.home).mkdir(parents=True, exist_ok=True)
     out |= {"pacchetti": [{k: p[k] for k in ("article_id", "titolo", "pagine", "sezioni", "nuovo_file")} for p in res.issued],
-            "pacchetti_testo_aperto_cc": [p["file"] for p in res.issued if p["testo_aperto_cc"]],
+            "pacchetti_testo_aperto_cc": (lambda cc: cc + [res.common_file] if cc else cc)(
+                [p["file"] for p in res.issued if p["testo_aperto_cc"]]),   # the common file holds no article text
             "pacchetti_emessi": len(res.issued), "esecuzioni_nuove": res.created_runs,
             "gia_con_scheda": len(res.skipped), "problemi": res.problems,
             "cartella_pacchetti": str(card_store.packets_dir(ctx.home)),
             "cartella_schede_da_inviare": str(card_store.to_send_dir(ctx.home)),
             "stato": card_store.status(ctx.conn)}
-    _print({**out, **_finish(ctx, wrote=bool(res.issued))})
+    _print({**out, **_finish(ctx, wrote=bool(res.issued or closed))})
     return 0 if not res.problems else 3
 
 

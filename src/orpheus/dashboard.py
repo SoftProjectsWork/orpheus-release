@@ -28,14 +28,13 @@ import secrets
 import socket
 import sqlite3
 import subprocess
-import sys
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import (__version__, audit, card_store, claims, config, content, db, engine, journal_cards, journal_profile, layout,
+from . import (__version__, audit, config, content, db, engine, journal_cards, journal_profile, layout,
                lineage, policy_changes, policy_versions, report, semantic, stats_terms, verify_doi)
 from .localstate import LocalState
 
@@ -44,7 +43,8 @@ STATIC_DIR = Path(__file__).with_name("dashboard_static")
 PORTS = range(8765, 8786)
 PLAN_CACHE_SECONDS = 60
 LANG_NAMES = {"it": "italiano", "en": "inglese"}
-REASONS = {"manual": "copia di sicurezza (backup)", "auto": "automatica dopo modifiche", "before_migrate": "prima della migrazione"}
+REASONS = {"manual": "copia di sicurezza (backup)", "auto": "automatica dopo modifiche", "before_migrate": "prima della migrazione",
+           "before_write": "prima di una modifica dal cruscotto"}
 
 
 def utc_now() -> str:
@@ -934,23 +934,27 @@ def eurydike_records(conn, review_id: str, q) -> dict | None:
                             da=start, quanti=many)
 
 
+_WRITE_LOCK = threading.RLock()     # writes run in worker threads (the page stays alive): still one at a time
+
+
 def _protected_write(s: Settings, conn, fn):
-    """A write from the page with the protections of a command that writes: refused when the copy check blocks;
-    afterwards this PC records what it has seen and backs up if the last backup is old."""
+    """A write from the page with the protections of a command that writes: refused when the copy check blocks; a backup
+    BEFORE the write if the last one is old (a restore point of the state before the change); afterwards this PC records
+    what it has seen."""
     from . import backups as backup_mod
     from .eurydike import review as rv
-    state = LocalState(s.local_root)
-    report = lineage.check(conn, state)
-    if report.blocking:
-        raise rv.ReviewError(report.message)
-    before = lineage.head(conn)
-    out = fn()
-    h = lineage.head(conn)
-    if h.database_id:
-        state.record_seen(h, s.db_path)
+    with _WRITE_LOCK:
+        state = LocalState(s.local_root)
+        report = lineage.check(conn, state)
+        if report.blocking:
+            raise rv.ReviewError(report.message)
         if getattr(s.project, "local", None) is not None:
-            backup_mod.maybe_auto_backup(conn, state, s.project.local, head_before=before)
-    return out
+            backup_mod.backup_before_write(conn, state, s.project.local)
+        out = fn()
+        h = lineage.head(conn)
+        if h.database_id:
+            state.record_seen(h, s.db_path)
+        return out
 
 
 # ---------------------------------------------------------------- T-056: submissions diary and lessons (R10: local only)
@@ -1803,6 +1807,7 @@ def set_page_look(s: Settings, body: dict) -> dict:
 def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | None = None, allowed_hosts=None,
                opener=None, lookup_clients=None, chooser=None):
     from starlette.applications import Starlette
+    from starlette.concurrency import run_in_threadpool
     from starlette.middleware import Middleware
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
@@ -1814,7 +1819,7 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
     runner = runner or LavoraRunner(lambda action: action_command(s, action))
     plans = PlanCache()
     searcher = Searcher(s.local_root)
-    hosts = set(allowed_hosts or ()) | {"127.0.0.1", "localhost", "testserver"}
+    hosts = set(allowed_hosts or ()) | {"127.0.0.1", "localhost"}
 
     class HostCheck(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
@@ -1824,6 +1829,8 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
             response = await call_next(request)
             response.headers["Cache-Control"] = "no-store"
             response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"          # another site cannot frame the page and its buttons
+            response.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
             return response
 
     def with_db(fn):
@@ -1863,7 +1870,8 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
             body = await request.json()
         except Exception:                                                # noqa: BLE001
             body = {}
-        action = (body or {}).get("azione")
+        body = body if isinstance(body, dict) else {}
+        action = body.get("azione")
         if action not in ACTIONS:
             return JSONResponse({"errore": "azione sconosciuta"}, status_code=400)
         extra = {}
@@ -1917,8 +1925,19 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
                 **_src("engine-v1 (gruppi di passi), orpheus_comandi.ps1", utc_now())}
 
     def lavora_output(request: Request):
-        since = int(request.query_params.get("da", "0") or 0)
-        return JSONResponse(runner.snapshot(max(0, since)))
+        asked = request.query_params.get("da", "0")
+        return JSONResponse(runner.snapshot(int(asked) if asked.isdigit() else 0))
+
+    def with_connection(fn, body, needs_db: bool = True, opened: list | None = None):
+        """One write, in a worker thread with its own connection: a backup or a long write does not stop the page."""
+        conn = s.connect() if needs_db else None
+        if opened is not None:
+            opened.append(True)
+        try:
+            return fn(conn, body)
+        finally:
+            if conn is not None:
+                conn.close()
 
     async def eurydike_post(request: Request, fn):
         from .eurydike import review as rv
@@ -1931,17 +1950,13 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         if not isinstance(body, dict):
             return JSONResponse({"errore": "richiesta non leggibile"}, status_code=400)
         try:
-            conn = s.connect()
+            return JSONResponse(await run_in_threadpool(with_connection, fn, body))
         except FileNotFoundError as exc:
             return JSONResponse({"errore": str(exc)}, status_code=503)
-        try:
-            return JSONResponse(fn(conn, body))
         except (rv.ReviewError, ValueError) as exc:
             return JSONResponse({"errore": str(exc)}, status_code=422)
         except sqlite3.DatabaseError as exc:
             return JSONResponse({"errore": f"il database ha rifiutato la modifica: {exc}"}, status_code=422)
-        finally:
-            conn.close()
 
     async def share_post(request: Request, fn, *, needs_db: bool = True):
         from . import sharing
@@ -1952,22 +1967,17 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
         except Exception:                                                # noqa: BLE001
             body = {}
         body = body if isinstance(body, dict) else {}
-        conn = None
+        opened: list = []
         try:
-            if needs_db:
-                conn = s.connect()
-            return JSONResponse(fn(conn, body))
+            return JSONResponse(await run_in_threadpool(with_connection, fn, body, needs_db, opened))
         except FileNotFoundError as exc:
-            return JSONResponse({"errore": str(exc)}, status_code=404 if not needs_db or conn else 503)
-        except (sharing.SharingError,) as exc:
+            return JSONResponse({"errore": str(exc)}, status_code=404 if opened else 503)
+        except sharing.SharingError as exc:
             return JSONResponse({"errore": exc.message}, status_code=422)
         except (ValueError, rv_error()) as exc:
             return JSONResponse({"errore": str(exc)}, status_code=422)
         except sqlite3.DatabaseError as exc:
             return JSONResponse({"errore": f"il database ha rifiutato la modifica: {exc}"}, status_code=422)
-        finally:
-            if conn is not None:
-                conn.close()
 
     async def journal_post(request: Request, fn, *, needs_db: bool = True):
         """POST of the journal list / assignments: token, copy check and backup (_protected_write), clear messages."""
@@ -1980,11 +1990,8 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
             body = None
         if not isinstance(body, dict):
             return JSONResponse({"errore": "richiesta non leggibile"}, status_code=400)
-        conn = None
         try:
-            if needs_db:
-                conn = s.connect()
-            return JSONResponse(fn(conn, body))
+            return JSONResponse(await run_in_threadpool(with_connection, fn, body, needs_db))
         except FileNotFoundError as exc:
             return JSONResponse({"errore": str(exc)}, status_code=503)
         except ListError as exc:
@@ -1993,9 +2000,6 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
             return JSONResponse({"errore": str(exc)}, status_code=422)
         except sqlite3.DatabaseError as exc:
             return JSONResponse({"errore": f"il database ha rifiutato la modifica: {exc}"}, status_code=422)
-        finally:
-            if conn is not None:
-                conn.close()
 
     async def submissions_endpoint(request: Request):
         what = request.path_params["what"]
@@ -2297,7 +2301,6 @@ def create_app(s: Settings, *, runner: LavoraRunner | None = None, token: str | 
             body = None
         if not isinstance(body, dict):
             return JSONResponse({"errore": "richiesta non leggibile"}, status_code=400)
-        from starlette.concurrency import run_in_threadpool
         try:
             return JSONResponse(await run_in_threadpool(fn, body))
         except (ValueError, OSError, subprocess.SubprocessError) as exc:

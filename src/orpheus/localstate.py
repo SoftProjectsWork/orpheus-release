@@ -49,6 +49,9 @@ def _read_json(path: Path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return default
+    except ValueError as exc:
+        raise ValueError(f"{path} è rovinato e ORPHEUS non può leggerlo: fai una copia del file, poi toglilo o "
+                         "ripristinalo (vedi RUNBOOK, sezione 'Copie vecchie o divergenti').") from exc
 
 
 class LocalState:

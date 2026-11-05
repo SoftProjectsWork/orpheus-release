@@ -29,10 +29,10 @@ REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 PY_TAG = "312"                                  # Python 3.12 (python312._pth); same minor as the embeddable zip
 EXTRAS = ("semantica", "cruscotto")             # local search by meaning, dashboard in the browser
-ALSO = ("tzdata",)
+ALSO = ("tzdata",)                              # time zones for zoneinfo on Windows
 # Longest path inside the zip: Windows stops at 260 characters, and the zip is extracted under
 # C:\Users\<name>\AppData\Local\Temp\<folder>\ (about 90 characters with a long user name).
-MAX_ENTRY = 160                              # time zones for zoneinfo on Windows
+MAX_ENTRY = 160
 
 # What goes into the public code (also used by pubblica.py). Patterns relative to the repository root.
 PUBLIC_FILES = [
@@ -53,7 +53,10 @@ PUBLIC_FILES = [
 # Never public, even if a pattern above matched: the owner's installer (git) and the log upload to GitHub.
 PRIVATE = ["tools/windows/installa_orpheus.*", "tools/windows/pubblica_registro.ps1", "*/__pycache__/*", "*.pyc"]
 # Text that must never appear in a public file.
-FORBIDDEN = [r"[A-Za-z0-9._%+-]+@gmail\.com", r"ghp_[A-Za-z0-9]{20,}", r"github_pat_[A-Za-z0-9_]{20,}"]
+FORBIDDEN = [r"ghp_[A-Za-z0-9]{20,}", r"github_pat_[A-Za-z0-9_]{20,}"]
+# Any e-mail address, except the examples of the documentation.
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+ALLOWED_EMAIL_DOMAINS = {"example.org", "example.com"}
 # Personal words, kept only as SHA-256 of the lower-case word (so the public code does not contain them).
 FORBIDDEN_WORDS = {"a2934ae84c46f3abee622d7ce00ea2d55854c69fbd296d133d3277b59ff69506", "b49e768e5556bfb154327b123947b274e9a814acd13d127b321fa4f711a79acb"}
 
@@ -86,14 +89,14 @@ def check_public(root: Path, files: list[Path]) -> list[str]:
     """Problems: forbidden text in a public file."""
     problems = []
     for rel in files:
-        data = (root / rel).read_bytes()
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
+        text = (root / rel).read_bytes().decode("utf-8", "replace")     # also a file that is not UTF-8 is read
         for pattern in FORBIDDEN:
             if re.search(pattern, text):
                 problems.append(f"{rel.as_posix()}: testo vietato ({pattern})")
+        for address in EMAIL.findall(text):
+            if address.rsplit("@", 1)[1].lower() not in ALLOWED_EMAIL_DOMAINS:
+                problems.append(f"{rel.as_posix()}: contiene un indirizzo e-mail")
+                break
         words = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", text)}
         if any(hashlib.sha256(w.encode()).hexdigest() in FORBIDDEN_WORDS for w in words):
             problems.append(f"{rel.as_posix()}: contiene un nome personale")

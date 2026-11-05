@@ -35,7 +35,7 @@ import csv
 import json
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -46,7 +46,7 @@ from . import audit, card_store, cards
 from .benchmark import excel_plain, excel_text, read_filled
 from .db import transaction
 from .ids import new_id
-from .segments import RULES_VERSION as SEGMENT_RULES
+from .segments import segment_for
 
 CLAIM_FORMAT, CLAIM_VERSION, APPRAISAL_RULES = "orpheus-affermazioni-v1", "claims-v1", "appraisal-v1"
 REPORTS_DIR, CLAIMS_DIR, TO_SEND, ACCEPTED = "rapporti", "affermazioni", "da_inviare", "accettate"
@@ -251,16 +251,6 @@ def appraisal(conn: sqlite3.Connection, article_id: str) -> tuple[str | None, di
         steps.append(f"senza gruppo di confronto → {level}")
     return level, {"disegno": design[:300], "classe": klass, "partecipanti": n, "gruppo_di_confronto": control,
                    "passi": steps}
-
-
-def segment_for(conn: sqlite3.Connection, document_id: str, page: int, quote: str) -> str | None:
-    rows = conn.execute("""SELECT id, text FROM segment WHERE document_id = ? AND rules = ? AND page_from <= ?
-                           AND page_to >= ? ORDER BY ord""", (document_id, SEGMENT_RULES, page, page)).fetchall()
-    q = cards.squash(quote)[:60]
-    for r in rows:
-        if q and q in cards.squash(r["text"]):
-            return r["id"]
-    return rows[0]["id"] if rows else None
 
 
 # ---------------------------------------------------------------- submit

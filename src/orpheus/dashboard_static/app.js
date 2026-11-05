@@ -3441,7 +3441,10 @@ function svgNode(text) {
 }
 function maNum(v, d) {
   if (v === null || v === undefined || v === "") return "—";
-  return Number(v).toFixed(d === undefined ? 2 : d).replace(".", ",");
+  const x = Number(v);
+  // A small value keeps two significant digits: a SD of 0.00025 must not read 0,00.
+  if (d === undefined && x !== 0 && Math.abs(x) < 0.1) return Number(x.toPrecision(2)).toString().replace(".", ",");
+  return x.toFixed(d === undefined ? 2 : d).replace(".", ",");
 }
 function maP(p) { return p === null || p === undefined ? "—" : p < 0.001 ? "<0,001" : maNum(p, 3); }
 function maWritten(st) { return Object.entries(st || {}).map(([k, v]) => `${(MA_STATS.find((x) => x[0] === k) || [k, k])[1]} ${v}`).join(" · "); }
